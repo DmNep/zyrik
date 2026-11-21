@@ -347,6 +347,23 @@ pub fn explain(title: &str, text: &str, error: bool) {
         return;
     }
     unsafe {
+        // вывод перенаправлен в файл или трубу (`zyrik --help | findstr …`, CI) — пишем туда
+        use windows::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_DISK, FILE_TYPE_PIPE};
+        use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+        if let Ok(h) = GetStdHandle(if error { STD_ERROR_HANDLE } else { STD_OUTPUT_HANDLE }) {
+            let kind = GetFileType(h);
+            if !h.is_invalid() && !h.0.is_null() && (kind == FILE_TYPE_PIPE || kind == FILE_TYPE_DISK) {
+                use std::io::Write;
+                let ok = if error {
+                    writeln!(std::io::stderr(), "{text}").is_ok()
+                } else {
+                    writeln!(std::io::stdout(), "{text}").is_ok()
+                };
+                if ok {
+                    return;
+                }
+            }
+        }
         if AttachConsole(ATTACH_PARENT_PROCESS).is_ok() {
             if let Ok(file) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
                 let handle = HANDLE(std::os::windows::io::AsRawHandle::as_raw_handle(&file));
