@@ -31,6 +31,7 @@ target\release\zyrik.exe --help
 Нужен X-сервер на этой же машине (`DISPLAY=:0`); X по сети и Wayland — пока нет (Wayland — фаза 5).
 Значок в трее — StatusNotifierItem (KDE, XFCE, Cinnamon; GNOME — с расширением AppIndicator). Нет трея — работает горячая клавиша.
 Проверка в контейнере: `docker build -t zyrik-x11 tools/linux-test && docker run --rm -v "$PWD:/src:ro" zyrik-x11`.
+На настоящих рабочих столах (KDE Plasma, XFCE, GNOME) — `tools/linux-desktops/`, порядок запуска в его Dockerfile.
 
 ## Структура
 

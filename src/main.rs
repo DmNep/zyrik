@@ -55,7 +55,8 @@ fn main() {
                 let mut platform = match linux::Linux::new() {
                     Ok(p) => p,
                     Err(e) => {
-                        linux::message(title, &e, true);
+                        // дождаться отправки уведомления, но не дольше пары секунд
+                        let _ = linux::message(title, &e, true).recv_timeout(std::time::Duration::from_secs(2));
                         std::process::exit(1);
                     }
                 };

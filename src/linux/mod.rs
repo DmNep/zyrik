@@ -503,6 +503,7 @@ impl Platform for Linux {
         x.conn.map_window(x.overlay).map_err(os)?;
         x.shown.store(true, Ordering::Relaxed);
         // клавиатура и мышь — окну выделения; клавиша-триггер может ещё держать захват — повторяем
+        let mut grabbed = false;
         for _ in 0..50 {
             let k = x
                 .conn
@@ -511,9 +512,16 @@ impl Platform for Linux {
                 .reply()
                 .map_err(os)?;
             if k.status == GrabStatus::SUCCESS {
+                grabbed = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
+        }
+        if !grabbed {
+            // Клавиатуру держит оболочка (обзор GNOME, открытое меню панели): выделение было бы
+            // под ней и не получало бы ни мыши, ни клавиш — не открываем его вовсе.
+            self.hide_overlay();
+            return Err(Problem::Os("клавиатура занята другой программой (открыт обзор или меню рабочего стола)".into()));
         }
         let mask = EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE | EventMask::POINTER_MOTION;
         let _ = x.conn.grab_pointer(true, x.overlay, mask, GrabMode::ASYNC, GrabMode::ASYNC, NONE, NONE, CURRENT_TIME);
@@ -591,7 +599,7 @@ impl Platform for Linux {
     }
 
     fn message(&self, title: &str, text: &str, error: bool) {
-        message(title, text, error);
+        let _ = message(title, text, error);
     }
 
     fn debug_log(&self, text: &str) {
@@ -609,19 +617,33 @@ impl Drop for Linux {
 }
 
 /// Сообщение: уведомление рабочего стола (org.freedesktop.Notifications) и текст в stderr.
-pub fn message(title: &str, text: &str, error: bool) {
+///
+/// Уведомление шлётся из отдельного потока и без ожидания: под GNOME вызов Notify из нашего
+/// процесса мог не вернуться, и Зырик переставал отвечать. Возвращает приёмник, по которому
+/// можно дождаться отправки (нужно перед выходом из программы).
+pub fn message(title: &str, text: &str, error: bool) -> std::sync::mpsc::Receiver<()> {
     eprintln!("{title}: {text}");
+    let (done, rx) = channel();
     if !tray::bus_is_local() {
-        return;
+        let _ = done.send(());
+        return rx;
     }
-    let Ok(bus) = zbus::blocking::Connection::session() else { return };
-    let hints: std::collections::HashMap<&str, zbus::zvariant::Value> =
-        [("urgency", zbus::zvariant::Value::U8(if error { 2 } else { 1 }))].into_iter().collect();
-    let _ = bus.call_method(
-        Some("org.freedesktop.Notifications"),
-        "/org/freedesktop/Notifications",
-        Some("org.freedesktop.Notifications"),
-        "Notify",
-        &(title, 0u32, "", title, text, Vec::<&str>::new(), hints, -1i32),
-    );
+    let (title, text) = (title.to_string(), text.to_string());
+    std::thread::spawn(move || {
+        if let Ok(bus) = zbus::blocking::Connection::session() {
+            let hints: std::collections::HashMap<&str, zbus::zvariant::Value> =
+                [("urgency", zbus::zvariant::Value::U8(if error { 2 } else { 1 }))].into_iter().collect();
+            let body = (title.as_str(), 0u32, "", title.as_str(), text.as_str(), Vec::<&str>::new(), hints, -1i32);
+            let msg = zbus::Message::method_call("/org/freedesktop/Notifications", "Notify")
+                .and_then(|b| b.destination("org.freedesktop.Notifications"))
+                .and_then(|b| b.interface("org.freedesktop.Notifications"))
+                .and_then(|b| b.with_flags(zbus::message::Flags::NoReplyExpected))
+                .and_then(|b| b.build(&body));
+            if let Ok(msg) = msg {
+                let _ = bus.send(&msg);
+            }
+        }
+        let _ = done.send(());
+    });
+    rx
 }
