@@ -5,13 +5,12 @@ mod capture;
 mod clipboard;
 mod hotkey;
 mod overlay;
-mod save_dialog;
+mod places;
 mod single_instance;
 mod tray;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
@@ -86,8 +85,6 @@ impl Win {
     pub fn new() -> Result<Win, String> {
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-            // COM нужен диалогу «Сохранить как…»; однопоточный, как требует оболочка
-            let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
             let instance: HINSTANCE = GetModuleHandleW(None).map_err(|e| e.message())?.into();
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -238,17 +235,12 @@ impl Platform for Win {
         clipboard::set_image(self.hwnd, image)
     }
 
-    fn save_dialog(&mut self, start: Option<&Path>, name: &str) -> Result<Option<PathBuf>, Problem> {
-        // владелец — окно выделения: диалог встаёт поверх него, выделение остаётся под ним
-        save_dialog::ask(self.overlay, start, name)
-    }
-
-    fn pictures_dir(&self) -> Option<PathBuf> {
-        save_dialog::pictures()
+    fn places(&self) -> Vec<zyrik::platform::Place> {
+        places::places()
     }
 
     fn local_time(&self) -> zyrik::export::Stamp {
-        save_dialog::now()
+        places::now()
     }
 
     fn message(&self, title: &str, text: &str, error: bool) {

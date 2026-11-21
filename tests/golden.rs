@@ -109,3 +109,30 @@ fn baked_shot_has_marks_but_no_ui() {
     let shot = render::bake(&f, sel, s.marks().items(), None);
     check("baked.png", &shot);
 }
+
+#[test]
+fn folder_picker_top_level() {
+    use std::path::PathBuf;
+    use zyrik::picker::Picker;
+    use zyrik::platform::{Monitor, Place, PlaceKind};
+    use zyrik::session::Rect;
+    let f = frame();
+    let s = scene();
+    let places = vec![
+        Place { kind: PlaceKind::Pictures, path: PathBuf::from("/x/pictures") },
+        Place { kind: PlaceKind::Desktop, path: PathBuf::from("/x/desktop") },
+        Place { kind: PlaceKind::Documents, path: PathBuf::from("/x/documents") },
+        Place { kind: PlaceKind::Downloads, path: PathBuf::from("/x/downloads") },
+        Place { kind: PlaceKind::Drive, path: PathBuf::from("C:\\") },
+        Place { kind: PlaceKind::Drive, path: PathBuf::from("D:\\") },
+    ];
+    let m = Monitor { rect: Rect { x: 0, y: 0, w: W as i32, h: H as i32 }, scale: 100 };
+    let mut pk = Picker::open(None, places, "Зырик_2026-11-21_09-05-07.png".into(), m);
+    let row = pk.layout().row_rect(2);
+    pk.input(Input::Move(Pt { x: row.x + 40, y: row.y + 4 }));
+    let mut out = Image::new(W, H);
+    let lang = Lang::from_code("ru").unwrap();
+    render::overlay(&f, &s, &mut out, lang);
+    render::picker(&mut out, &pk, lang);
+    check("picker_ru.png", &out);
+}

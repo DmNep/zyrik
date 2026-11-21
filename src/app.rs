@@ -9,7 +9,8 @@ use crate::args::{program_path, ArgError, Options, MAX_CLEAR_MINUTES};
 use crate::hotkey::{Hotkey, KeyError, META_NAME};
 use crate::i18n::{Lang, Msg};
 use crate::image::Image;
-use crate::platform::{Command, Frame, MenuItem, Platform, Problem, Shot};
+use crate::picker::{self, PickOutcome, Picker, Status};
+use crate::platform::{Command, Frame, MenuItem, PlaceKind, Platform, Problem, Shot};
 use crate::session::{Cursor, Input, Outcome, Session};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -122,7 +123,9 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
     }
 
     // «Последняя папка» для Ctrl+S — только в памяти (история 3).
-    let mut last_dir: Option<PathBuf> = opts.save_dir.clone().or_else(|| p.pictures_dir());
+    let mut last_dir: Option<PathBuf> = opts.save_dir.clone().or_else(|| {
+        p.places().into_iter().find(|pl| pl.kind == PlaceKind::Pictures).map(|pl| pl.path)
+    });
     // Открытый режим выделения. При удалении кадр и холст затираются (Image::drop).
     let mut active: Option<Active> = None;
     while let Some(cmd) = p.next_command() {
@@ -140,6 +143,25 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
             }
             Command::Overlay(input) => {
                 let Some(a) = active.as_mut() else { continue };
+                if a.picker.is_some() {
+                    // открыт выбор папки — весь ввод ему
+                    let Some(dir) = a.pick(p, input) else { continue };
+                    match a.save_into(p, &dir) {
+                        Ok(path) => {
+                            saved(p, lang, &path);
+                            last_dir = Some(dir);
+                            p.hide_overlay();
+                            active = None;
+                        }
+                        Err(e) => {
+                            if let Some(pk) = a.picker.as_mut() {
+                                pk.set_status(Status::SaveFailed(e));
+                            }
+                            a.redraw(p);
+                        }
+                    }
+                    continue;
+                }
                 let outcome = a.session.input(input);
                 if let Input::Down(_, pt) | Input::Move(pt) | Input::Up(_, pt) = input {
                     p.set_cursor(a.session.cursor_at(pt));
@@ -170,19 +192,24 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                         }
                         // снимок теперь у платформы: она затрёт его после вставки
                     }
-                    Outcome::Save(rect) | Outcome::SaveAs(rect) => {
-                        let dialog = matches!(outcome, Outcome::SaveAs(_));
-                        let shot = a.bake(rect);
-                        if let Some(path) = save(p, lang, &shot, last_dir.as_deref(), dialog) {
-                            p.debug_log(&lang.fmt(Msg::LogSaved, &[("path", &path.display().to_string())]));
-                            last_dir = path.parent().map(Path::to_path_buf);
-                            p.hide_overlay();
-                            active = None;
-                        } else if let Some(a) = active.as_mut() {
-                            // передумал или не вышло — снимок не теряется, выделение остаётся
-                            a.redraw(p);
-                        }
+                    Outcome::Save(_) => {
+                        // Ctrl+S — сразу в последнюю папку; не вышло — выбор папки с объяснением,
+                        // снимок не теряется
+                        let status = match last_dir.clone() {
+                            Some(dir) => match a.save_into(p, &dir) {
+                                Ok(path) => {
+                                    saved(p, lang, &path);
+                                    p.hide_overlay();
+                                    active = None;
+                                    continue;
+                                }
+                                Err(e) => Some(Status::Unavailable(dir, e)),
+                            },
+                            None => None,
+                        };
+                        a.open_picker(p, last_dir.as_deref(), status);
                     }
+                    Outcome::SaveAs(_) => a.open_picker(p, last_dir.as_deref(), None),
                 }
             }
             Command::About => {
@@ -207,11 +234,16 @@ struct Active {
     session: Session,
     /// Сюда собирается картинка оверлея; размер как у кадра
     canvas: Image,
+    /// Открыт выбор папки (дискета или Ctrl+S, который не смог сохранить)
+    picker: Option<Picker>,
 }
 
 impl Active {
     fn redraw<P: Platform>(&mut self, p: &mut P) {
         render::overlay(&self.frame.image, &self.session, &mut self.canvas, self.lang);
+        if let Some(pk) = &self.picker {
+            render::picker(&mut self.canvas, pk, self.lang);
+        }
         p.present(&self.canvas);
     }
 
@@ -219,38 +251,58 @@ impl Active {
     fn bake(&self, rect: crate::session::Rect) -> Image {
         render::bake(&self.frame.image, rect, self.session.marks().items(), self.session.live().as_ref())
     }
+
+    /// Открыть выбор папки на мониторе зоны, начиная с `start`.
+    fn open_picker<P: Platform>(&mut self, p: &mut P, start: Option<&Path>, status: Option<Status>) {
+        let Some(sel) = self.session.selection() else { return };
+        let (w, h) = (self.frame.image.width() as i32, self.frame.image.height() as i32);
+        let screen = crate::session::Rect { x: 0, y: 0, w, h };
+        let monitor = picker::monitor_for(sel, screen, &self.frame.monitors);
+        let name = export::file_name(self.lang.tr(Msg::AppName), p.local_time());
+        let mut pk = Picker::open(start, p.places(), name, monitor);
+        if let Some(s) = status {
+            pk.set_status(s);
+        }
+        self.picker = Some(pk);
+        p.set_cursor(Cursor::Arrow);
+        self.redraw(p);
+    }
+
+    /// Ввод в выбор папки. `Some(папка)` — человек выбрал, куда сохранить.
+    fn pick<P: Platform>(&mut self, p: &mut P, input: Input) -> Option<PathBuf> {
+        let pk = self.picker.as_mut()?;
+        if let Input::Move(_) | Input::Down(..) = input {
+            p.set_cursor(Cursor::Arrow);
+        }
+        match pk.input(input) {
+            PickOutcome::Nothing => None,
+            PickOutcome::Redraw => {
+                self.redraw(p);
+                None
+            }
+            PickOutcome::Close => {
+                self.picker = None;
+                self.redraw(p);
+                None
+            }
+            PickOutcome::Save(dir) => Some(dir),
+        }
+    }
+
+    /// Записать снимок в `dir` под новым именем, ничего не перезаписывая (история 3).
+    fn save_into<P: Platform>(&self, p: &P, dir: &Path) -> Result<PathBuf, String> {
+        let sel = self.session.selection().ok_or_else(String::new)?;
+        let png = export::encode_png(&self.bake(sel));
+        let name = export::file_name(self.lang.tr(Msg::AppName), p.local_time());
+        export::save_unique(dir, &name, &png).map_err(|e| {
+            p.debug_log(&format!("{}: {e}", dir.display()));
+            e.to_string()
+        })
+    }
 }
 
-/// Ctrl+S — сразу в последнюю папку; дискета, недоступная папка или её отсутствие — диалог.
-/// Возвращает путь сохранённого файла; `None` — не сохранили (передумал или ошибка, о ней сказано).
-fn save<P: Platform>(p: &mut P, lang: Lang, shot: &Image, last_dir: Option<&Path>, dialog: bool) -> Option<PathBuf> {
-    let title = lang.tr(Msg::AppName);
-    let png = export::encode_png(shot);
-    let name = export::file_name(title, p.local_time());
-    if !dialog {
-        if let Some(dir) = last_dir {
-            match export::save_unique(dir, &name, &png) {
-                Ok(path) => return Some(path),
-                Err(e) => p.debug_log(&format!("{}: {e} — открываю диалог", dir.display())),
-            }
-        }
-    }
-    let path = match p.save_dialog(last_dir, &name) {
-        Ok(Some(path)) => path,
-        Ok(None) => return None,
-        Err(e) => {
-            p.message(title, &lang.fmt(Msg::SaveFailed, &[("error", &format!("{e:?}"))]), true);
-            return None;
-        }
-    };
-    match export::save_to(&path, &png) {
-        Ok(()) => Some(path),
-        Err(e) => {
-            let error = format!("{}: {e}", path.display());
-            p.message(title, &lang.fmt(Msg::SaveFailed, &[("error", &error)]), true);
-            None
-        }
-    }
+fn saved<P: Platform>(p: &P, lang: Lang, path: &Path) {
+    p.debug_log(&lang.fmt(Msg::LogSaved, &[("path", &path.display().to_string())]));
 }
 
 /// Снять экран и открыть выделение. Захват — первым делом, пока на экране ничего нашего.
@@ -268,7 +320,7 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
     // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
     let (w, h) = (frame.image.width(), frame.image.height());
     let session = Session::with_monitors(w, h, frame.monitors.clone());
-    let mut a = Active { shot, lang, session, canvas: Image::new(w, h), frame };
+    let mut a = Active { shot, lang, session, canvas: Image::new(w, h), frame, picker: None };
     if let Err(e) = p.show_overlay(a.frame.x, a.frame.y, w, h) {
         p.message(lang.tr(Msg::AppName), &format!("{e:?}"), true);
         return None;

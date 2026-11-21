@@ -9,6 +9,7 @@ pub mod hotkey;
 pub mod i18n;
 pub mod image;
 pub mod oneshot;
+pub mod picker;
 pub mod platform;
 pub mod session;
 pub mod toolbar;

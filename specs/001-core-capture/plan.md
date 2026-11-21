@@ -43,7 +43,7 @@ PNG, параметры, языки), — общее ядро на чистом 
                          ▼
 ┌──────────── платформа (win / mac / linux) ────────────┐
 │ hotkey · capture · overlay-окно · tray · clipboard    │
-│ ocr · save-dialog · single-instance                   │
+│ ocr · places · single-instance                        │
 └──────┬───────────────────────────────▲────────────────┘
        │ кадр RGBA + геометрия мониторов│ готовый буфер пикселей
        ▼                               │
@@ -90,7 +90,7 @@ PNG, параметры, языки), — общее ядро на чистом 
 | Буфер обмена | CF_DIB + форматы `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory=0`, `CanUploadToCloudClipboard=0` | `NSPasteboard` + типы `org.nspasteboard.TransientType`, `ConcealedType` | владение CLIPBOARD (живём в трее — отдаём данные по запросу) + `x-kde-passwordManagerHint: secret` | `wl_data_device` + тот же хинт |
 | Трей | `Shell_NotifyIcon` (как в Зябре) | `NSStatusItem` | StatusNotifierItem по D-Bus | то же; в GNOME виден только с расширением AppIndicator |
 | Распознавание текста (P2) | встроенный Tesseract (ядро, общий код) | то же | то же | то же |
-| Диалог «Сохранить как» | `IFileSaveDialog` | `NSSavePanel` | портал FileChooser по D-Bus | то же |
+| Выбор папки (дискета) | свой, в ядре (`picker`); от ОС — известные папки (`SHGetKnownFolderPath`) и диски (`GetLogicalDrives`) | свой; `~/Pictures` и др., `/Volumes` | свой; XDG user dirs, `/` | то же |
 | Один экземпляр | именованный мьютекс | POSIX-семафор `sem_open` (без файла) [ИССЛЕДОВАТЬ] | абстрактный unix-сокет (без файла на диске) | то же |
 
 ### Уточнения по ходу фазы 1
@@ -268,3 +268,7 @@ zyrik/
    - (а) оставить и написать в README;
    - (б) сохранить эти ключи перед диалогом и вернуть как было после него — Зырик сам пишет в реестр, но только чтобы убрать след;
    - (в) свой простой выбор папки вместо системного диалога — дольше и непривычнее.
+
+   **Решено (2026-11-21): (в).** Свой выбор папки — панель внутри окна выделения (`src/picker.rs`, рисует `annot::render::picker`).
+   Только чтение списков папок через `std::fs`; скрытые и системные папки не показываются; папки не создаются; имя файла — по дате-времени, без перезаписи.
+   Плюс: один и тот же код на всех ОС, и не нужны портал FileChooser на Linux и `NSSavePanel` на macOS.

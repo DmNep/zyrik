@@ -3,7 +3,7 @@
 //! Платформа не принимает решений: она ловит события ОС, превращает их в [`Command`]
 //! и выполняет то, что скажет ядро (`app`).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::export::Stamp;
 use crate::hotkey::Hotkey;
@@ -60,6 +60,24 @@ pub struct Frame {
     pub monitors: Vec<Monitor>,
 }
 
+/// Известная папка или диск — верхний уровень выбора папки (`picker`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceKind {
+    Pictures,
+    Desktop,
+    Documents,
+    Downloads,
+    Home,
+    /// Диск (`C:\`) или корень файловой системы; название — сам путь
+    Drive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    pub kind: PlaceKind,
+    pub path: PathBuf,
+}
+
 /// Пункт меню трея.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
@@ -108,12 +126,9 @@ pub trait Platform {
     /// Содержимое буфера программа не читает никогда.
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem>;
 
-    /// Диалог «Сохранить как…» поверх окна выделения, начиная с папки `start`.
-    /// `None` — человек передумал. Ничего не запоминает (FR-007).
-    fn save_dialog(&mut self, start: Option<&Path>, file_name: &str) -> Result<Option<PathBuf>, Problem>;
-
-    /// Системная папка «Изображения» — последняя папка по умолчанию (история 3).
-    fn pictures_dir(&self) -> Option<PathBuf>;
+    /// Известные папки («Изображения» первой — она же папка по умолчанию для Ctrl+S) и диски.
+    /// Только узнать пути: ничего не открывать и не создавать.
+    fn places(&self) -> Vec<Place>;
 
     /// Местные дата и время — для имени файла.
     fn local_time(&self) -> Stamp;

@@ -68,7 +68,7 @@ fn s(v: i32, scale: u32) -> i32 {
 }
 
 /// Монитор, на котором правый нижний угол зоны; если такого нет — весь экран.
-fn monitor_of(sel: Rect, screen: Rect, monitors: &[Monitor]) -> Monitor {
+pub fn monitor_of(sel: Rect, screen: Rect, monitors: &[Monitor]) -> Monitor {
     let corner = Pt { x: sel.right() - 1, y: sel.bottom() - 1 };
     monitors
         .iter()

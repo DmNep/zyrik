@@ -7,6 +7,8 @@ use super::{text, Color, Mark, Shape, Tool, P};
 use crate::i18n::{Lang, Msg};
 use crate::image::Image;
 use crate::session::{Pt, Rect, Session};
+use crate::picker::{Entry, Hit, Picker, Status};
+use crate::platform::PlaceKind;
 use crate::toolbar::{Bar, Button};
 
 /// Синий значка «о_О»
@@ -573,6 +575,193 @@ fn preview(img: &mut Image, p: Pt, value: f32, is_text: bool, color: Color) {
     let (lw, _, _) = text::measure(&label, 14.0);
     fill(img, lx - 3, ly - 1, lw + 6, th + 2, 0xC018_1820);
     text::draw(img, lx, ly, &label, 14.0, WHITE, full);
+}
+
+// ---------- выбор папки (дискета) ----------
+
+const PANEL_BG: u32 = 0xFF1C_1C24;
+const LIST_BG: u32 = 0xFF14_141A;
+const MUTED: u32 = 0xFFA8_A8B8;
+const ERROR_FG: u32 = 0xFFFF_7A7A;
+const FOLDER: u32 = 0xFFE8_B84A;
+const DRIVE: u32 = 0xFF9A_A4B8;
+const ACCENT_HOVER: u32 = 0xFF4A_82EE;
+const BUTTON_BG: u32 = 0xFF3A_3A48;
+const BUTTON_HOVER: u32 = 0xFF4C_4C5C;
+
+/// Обрезать строку под ширину: «…» в конце, а для пути (`keep_end`) — в начале,
+/// чтобы была видна сама папка.
+fn fit(s: &str, size: f32, max_w: i32, keep_end: bool) -> String {
+    if text::measure(s, size).0 <= max_w {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let make = |n: usize| -> String {
+        if keep_end {
+            std::iter::once('…').chain(chars[chars.len() - n..].iter().copied()).collect()
+        } else {
+            chars[..n].iter().copied().chain(std::iter::once('…')).collect()
+        }
+    };
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if text::measure(&make(mid), size).0 <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    make(lo)
+}
+
+fn place_name(kind: PlaceKind, lang: Lang) -> Option<&'static str> {
+    Some(lang.tr(match kind {
+        PlaceKind::Pictures => Msg::PlacePictures,
+        PlaceKind::Desktop => Msg::PlaceDesktop,
+        PlaceKind::Documents => Msg::PlaceDocuments,
+        PlaceKind::Downloads => Msg::PlaceDownloads,
+        PlaceKind::Home => Msg::PlaceHome,
+        PlaceKind::Drive => return None,
+    }))
+}
+
+fn rounded_fill(img: &mut Image, r: Rect, rad: f32, color: u32, edge: Option<(u32, f32)>) {
+    with_pixmap(img, Rect { x: r.x - 2, y: r.y - 2, w: r.w + 4, h: r.h + 4 }, |pm, t| {
+        let mut pb = PathBuilder::new();
+        rounded(&mut pb, r, rad);
+        if let Some(path) = pb.finish() {
+            pm.fill_path(&path, &paint(color), FillRule::Winding, t, None);
+            if let Some((c, w)) = edge {
+                pm.stroke_path(&path, &paint(c), &stroke(w), t, None);
+            }
+        }
+    });
+}
+
+/// Текст в прямоугольнике: по центру по вертикали, с отступом `left` слева
+/// (`None` — по центру и по горизонтали). За прямоугольник не вылезает.
+fn text_in(img: &mut Image, r: Rect, left: Option<i32>, s: &str, size: f32, color: u32) {
+    let (w, h, _) = text::measure(s, size);
+    let x = match left {
+        Some(dx) => r.x + dx,
+        None => r.x + (r.w - w) / 2,
+    };
+    text::draw(img, x, r.y + (r.h - h) / 2, s, size, color, r);
+}
+
+fn folder_icon(img: &mut Image, x: i32, cy: i32, k: f32, color: u32) {
+    let s = |v: f32| (v * k).round() as i32;
+    fill(img, x, cy - s(7.0), s(8.0), s(3.0), color);
+    fill(img, x, cy - s(5.0), s(18.0), s(12.0), color);
+}
+
+fn drive_icon(img: &mut Image, x: i32, cy: i32, k: f32) {
+    let s = |v: f32| (v * k).round() as i32;
+    fill(img, x, cy - s(5.0), s(18.0), s(10.0), DRIVE);
+    fill(img, x + s(13.0), cy + s(1.0), s(3.0), s(2.0), 0xFF3A_E07A);
+}
+
+fn button(img: &mut Image, r: Rect, label: &str, size: f32, k: f32, bg: u32, fg: u32) {
+    rounded_fill(img, r, 6.0 * k, bg, None);
+    let label = fit(label, size, r.w - (12.0 * k) as i32, false);
+    text_in(img, r, None, &label, size, fg);
+}
+
+/// Панель выбора папки поверх оверлея.
+pub fn picker(img: &mut Image, pk: &Picker, lang: Lang) {
+    let l = *pk.layout();
+    let k = l.scale as f32 / 100.0;
+    let s = |v: f32| (v * k).round() as i32;
+    let full = Rect { x: 0, y: 0, w: img.width() as i32, h: img.height() as i32 };
+    rounded_fill(img, l.panel, 10.0 * k, PANEL_BG, Some((ACCENT, 1.5 * k)));
+    let x = l.panel.x + l.pad;
+    let inner = l.panel.w - 2 * l.pad;
+
+    let title = fit(lang.tr(Msg::PickerTitle), l.title_size, inner, false);
+    text::draw(img, x, l.title_y, &title, l.title_size, WHITE, full);
+    let path = match pk.dir() {
+        Some(d) => d.display().to_string(),
+        None => lang.tr(Msg::PickerTop).to_string(),
+    };
+    text::draw(img, x, l.path_y, &fit(&path, l.text_size, inner, true), l.text_size, MUTED, full);
+
+    // список
+    fill_rect(img, l.list, LIST_BG);
+    let entries = pk.entries();
+    let scroll = entries.len() > l.rows;
+    let bar_w = if scroll { s(6.0) } else { 0 };
+    for vis in 0..l.rows {
+        let i = pk.top() + vis;
+        let Some(e) = entries.get(i) else { break };
+        let r = Rect { w: l.list.w - bar_w, ..l.row_rect(vis) };
+        if i == pk.current() {
+            fill_rect(img, r, ACCENT);
+        } else if pk.hover() == Some(Hit::Row(i)) {
+            fill_rect(img, r, HOVER_BG);
+        }
+        let (ix, cy) = (r.x + s(8.0), r.y + r.h / 2);
+        let label = match e {
+            Entry::Up => {
+                text_in(img, Rect { x: ix, w: s(18.0), ..r }, None, "↑", l.text_size, WHITE);
+                "..".to_string()
+            }
+            Entry::Place(p) if p.kind.is_drive() => {
+                drive_icon(img, ix, cy, k);
+                p.path.display().to_string()
+            }
+            Entry::Place(p) => {
+                folder_icon(img, ix, cy, k, FOLDER);
+                place_name(p.kind, lang).unwrap_or_default().to_string()
+            }
+            Entry::Folder(name) => {
+                folder_icon(img, ix, cy, k, FOLDER);
+                name.clone()
+            }
+        };
+        let left = s(36.0);
+        let label = fit(&label, l.text_size, r.w - left - s(6.0), false);
+        text_in(img, r, Some(left), &label, l.text_size, WHITE);
+    }
+    if scroll {
+        let track = Rect { x: l.list.right() - bar_w, w: bar_w, ..l.list };
+        let n = entries.len() as i32;
+        let th = (track.h * l.rows as i32 / n).max(s(16.0));
+        let max_top = (n - l.rows as i32).max(1);
+        let ty = track.y + (track.h - th) * pk.top() as i32 / max_top;
+        fill_rect(img, Rect { y: ty, h: th, ..track }, BUTTON_HOVER);
+    }
+
+    // имя файла и сообщение
+    let file = lang.fmt(Msg::PickerFile, &[("name", pk.file_name())]);
+    text::draw(img, x, l.file_y, &fit(&file, l.text_size, inner, false), l.text_size, WHITE, full);
+    let status = match pk.status() {
+        Some(Status::Unavailable(p, e)) => Some((
+            lang.fmt(Msg::PickerUnavailable, &[("path", &p.display().to_string()), ("error", e)]),
+            ERROR_FG,
+        )),
+        Some(Status::CantOpen(e)) => Some((lang.fmt(Msg::PickerCantOpen, &[("error", e)]), ERROR_FG)),
+        Some(Status::SaveFailed(e)) => Some((lang.fmt(Msg::SaveFailed, &[("error", e)]), ERROR_FG)),
+        None if pk.dir().is_none() => Some((lang.tr(Msg::PickerChoose).to_string(), MUTED)),
+        None => None,
+    };
+    if let Some((t, c)) = status {
+        text::draw(img, x, l.status_y, &fit(&t, l.small_size, inner, false), l.small_size, c, full);
+    }
+
+    // кнопки
+    let hover = pk.hover();
+    let (bg, fg) = match (pk.dir().is_some(), hover == Some(Hit::Save)) {
+        (false, _) => (BUTTON_BG, MUTED),
+        (true, false) => (ACCENT, WHITE),
+        (true, true) => (ACCENT_HOVER, WHITE),
+    };
+    button(img, l.save, lang.tr(Msg::PickerSave), l.text_size, k, bg, fg);
+    let bg = if hover == Some(Hit::Back) { BUTTON_HOVER } else { BUTTON_BG };
+    button(img, l.back, lang.tr(Msg::PickerBack), l.text_size, k, bg, WHITE);
+
+    let hint = fit(lang.tr(Msg::PickerHint), l.small_size, inner, false);
+    text::draw(img, x, l.hint_y, &hint, l.small_size, MUTED, full);
 }
 
 #[cfg(test)]
