@@ -129,12 +129,21 @@
 
 > Ядро не трогаем; если пришлось — это сигнал, что граница трейта `Platform` проведена неудачно, правим трейт.
 
-- [ ] T043 [P] `src/linux/x11.rs`: XGrabKey, `XGetImage`/MIT-SHM, override-redirect окно, `XPutImage`, Xinerama/RandR для мониторов.
-- [ ] T044 [P] `src/linux/clipboard.rs`: владение CLIPBOARD, выдача PNG по запросу, хинт `x-kde-passwordManagerHint: secret`.
-- [ ] T045 [P] `src/linux/tray.rs`: StatusNotifierItem через `zbus`.
-- [ ] T046 [P] `src/linux/portal.rs`: FileChooser для дискеты; абстрактный unix-сокет — один экземпляр и `--trigger`.
-- [ ] T047 CI-проверка `no-disk` (Linux, Xvfb): сценарий «10 снимков без Ctrl+S» под `strace -f -e trace=openat,creat,rename,unlink,connect` — запись в файл или не-`AF_UNIX` сокет = провал.
-- [ ] T048 **Решение D7 с владельцем продукта**: macOS — `Зырик.app` в zip или голый бинарник.
+- [x] T043 [P] `src/linux/`: X11 через `x11rb` (чистый Rust, без libxcb). Подключение только по unix-сокету: `DISPLAY` с именем машины не принимаем (`conn.rs`). `XGrabKey` (с CapsLock/NumLock) · `GetImage` · override-redirect окно, `PutImage` кусками · RandR `GetMonitors` · масштаб из `Xft.dpi` · буквы по первой раскладке, текст подписи по текущей (`keys.rs`, кириллица).
+- [x] T044 [P] `src/linux/clipboard.rs`: владение CLIPBOARD, `image/png` по запросу (INCR для больших), `x-kde-passwordManagerHint: secret`. Одноразовость как в Windows: «передний план» — тот же клиент X, что у `_NET_ACTIVE_WINDOW`; модификатор — Ctrl/Super по `QueryKeymap`.
+- [x] T045 [P] `src/linux/tray.rs`: StatusNotifierItem через `ksni` (`zbus`, без tokio); адрес шины — только `unix:`. Нет трея — Зырик работает дальше, горячая клавиша остаётся. Сообщения — уведомления рабочего стола + stderr.
+- [x] T046 [P] Дискета — свой выбор папки (T042a), портал FileChooser не нужен; места — XDG user dirs, домашняя, `/`, `/media/$USER/*`. Один экземпляр — абстрактный unix-сокет `zyrik-<uid>` (без файла). `--trigger` — в фазе 5 (Wayland), под X11 не нужен.
+- [x] T047 CI `linux-x11` и `tools/linux-test/` (Docker): сценарий под Xvfb + `strace -f` — на запись открываются только сохранённые снимки, все `connect` — `AF_UNIX`.
+
+*Итог Linux X11 (2026-11-22):* контейнер Debian bookworm, Xvfb 1600×900, xdotool/xclip, релизная сборка под strace — всё прошло:
+- вторая копия не запускается; выделение на экране через 47–74 мс (снято за 18–34 мс);
+- Enter → в буфере `TARGETS, image/png, x-kde-passwordManagerHint` (= `secret`); без Ctrl `image/png` не отдаётся; с Ctrl — PNG 500×300, можно вставить ещё раз; отпустили Ctrl — буфер пуст;
+- Ctrl+S → `Зырик_…png` в `--save-dir`, чанки только IHDR/IDAT/IEND; дискета → выбор папки → Enter → Ctrl+S → в «Снимки»; следующий Ctrl+S туда же; Esc и правая кнопка закрывают;
+- strace: на запись — только три снимка; `connect` — X-сервер (`@/tmp/.X11-unix/X99`) и шина D-Bus, оба AF_UNIX;
+- 112 тестов зелёные и под Linux; размер под Linux 2,7 МБ (D-Bus для трея).
+Не проверено: настоящий рабочий стол (KDE/GNOME с треем), HiDPI, несколько мониторов.
+
+- [x] T048 **D7 решено (2026-11-22): `Зырик.app` в zip.** Проверка — в GitHub Actions на macOS (приватный репозиторий).
 - [ ] T049 [P] `src/mac/`: Carbon hotkey, ScreenCaptureKit, `NSWindow` поверх всего на каждом мониторе, `NSStatusItem`, `NSSavePanel`, `sem_open`; сообщение, если нет разрешения «Запись экрана».
 - [ ] T050 [P] `src/mac/clipboard.rs`: `NSPasteboard` + `org.nspasteboard.TransientType`, `ConcealedType`.
 - [ ] T051 Упаковка macOS по итогам T048 (Info.plist, `NSScreenCaptureUsageDescription`).

@@ -39,6 +39,16 @@ jobs:
           name: zyrik-windows
           path: target/x86_64-pc-windows-gnu/release/zyrik.exe
 
+  linux-x11:
+    # T047: сценарий под Xvfb + strace — запись на диск только в сохранённые снимки,
+    # соединения только AF_UNIX (принцип I)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool xclip strace x11-utils x11-xkb-utils
+      - run: SRC=$GITHUB_WORKSPACE bash tools/linux-test/run.sh
+
   offline:
     # Принцип I: в программе нет сети. Проверяем код и дерево зависимостей.
     runs-on: ubuntu-latest
