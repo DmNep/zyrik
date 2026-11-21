@@ -310,6 +310,10 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
     let t0 = Instant::now();
     let frame = match p.capture() {
         Ok(f) => f,
+        Err(Problem::NoPermission) => {
+            p.message(lang.tr(Msg::AppName), lang.tr(Msg::CapturePermission), true);
+            return None;
+        }
         Err(e) => {
             let text = lang.fmt(Msg::CaptureFailed, &[("error", &format!("{e:?}"))]);
             p.message(lang.tr(Msg::AppName), &text, true);

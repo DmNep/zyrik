@@ -49,6 +49,20 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool xclip strace x11-utils x11-xkb-utils
       - run: SRC=$GITHUB_WORKSPACE bash tools/linux-test/run.sh
 
+  macos-app:
+    # D7: Зырик.app в zip; дымовая проверка на macOS 14 (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bash tools/macos/bundle.sh
+      - name: Smoke test
+        run: bash tools/macos/smoke.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zyrik-macos
+          path: target/macos/Zyrik-macos.zip
+
   offline:
     # Принцип I: в программе нет сети. Проверяем код и дерево зависимостей.
     runs-on: ubuntu-latest

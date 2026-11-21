@@ -29,6 +29,11 @@ Snap: {key}.
 Launch options: "{program}" --help"""
 
 "capture.failed" = "Could not capture the screen: {error}"
+"capture.permission" = """
+Zyrik needs permission to record the screen.
+
+Open System Settings → Privacy & Security → Screen & System Audio Recording, turn Zyrik on and start it again.
+The shot never leaves your computer: it stays in memory until you paste or save it."""
 "clipboard.failed" = "Could not put the shot on the clipboard: {error}"
 
 "instance.running" = "Zyrik is already running — look for the «о_О» icon in the tray."
