@@ -93,6 +93,13 @@ PNG, параметры, языки), — общее ядро на чистом 
 | Диалог «Сохранить как» | `IFileSaveDialog` | `NSSavePanel` | портал FileChooser по D-Bus | то же |
 | Один экземпляр | именованный мьютекс | POSIX-семафор `sem_open` (без файла) [ИССЛЕДОВАТЬ] | абстрактный unix-сокет (без файла на диске) | то же |
 
+### Уточнения по ходу фазы 1
+
+- **Главный цикл живёт в ядре** (`app.rs`). У платформы есть `next_command()`: она блокируется, пока ОС не пришлёт событие, и возвращает его как `Command`. Ядро решает, что делать дальше. Поэтому весь цикл (единственная копия, трей, занятая клавиша, меню) проверяется тестами с поддельной платформой (`tests/app.rs`), без Windows.
+- **Значок трея** грузится через `LoadImageW`. `LoadIconMetric` не годится: её нет в comctl32 v5, и exe без манифеста падает при запуске с 0xC0000139.
+- **Манифест не вшиваем.** В GNU-сборке exe уже содержит манифест, второй ломает линковку («multiple non-default manifests»). Per-Monitor DPI v2 включается из кода (`SetProcessDpiAwarenessContext`).
+- **Значок «о_О»** — белые глаза на синей плашке: тёмный контур без плашки пропадал на тёмной панели задач.
+
 ## Ключевые решения
 
 | # | Решение | Почему | Отвергнутая альтернатива |
@@ -141,6 +148,7 @@ zyrik/
 ├── src/
 │   ├── main.rs              # args → платформа → цикл событий
 │   ├── lib.rs               # ядро, без зависимостей от ОС
+│   ├── app.rs  platform.rs  hotkey.rs   # главный цикл, трейт Platform, модель клавиш
 │   ├── args.rs  i18n.rs  session.rs  toolbar.rs  export.rs
 │   ├── annot/{mod,render}.rs
 │   ├── redact/{mod,rules,validators,bip39}.rs
@@ -149,6 +157,7 @@ zyrik/
 │   ├── mac/{…то же…}.rs
 │   └── linux/{mod,x11,wayland,portal,clipboard,tray}.rs
 ├── third_party/tesseract, leptonica, tessdata_fast/{eng,rus}.traineddata
+├── tools/make_icon.py       # рисует assets/zyrik.ico («о_О»)
 ├── NOTICE.md                # лицензии Tesseract, Leptonica, моделей, шрифта, BIP-39
 ├── tests/redact_corpus/     # картинки/тексты с «опасным» и без — для SC-006/SC-008
 └── specs/ memory/

@@ -1,0 +1,78 @@
+# English. Every table has the same keys, or the build fails.
+# Placeholders in braces ({key}) must match too.
+
+"lang.name" = "English"
+"app.name" = "Zyrik"
+
+"shot.region" = "region"
+"shot.screen" = "screen"
+"shot.window" = "window"
+
+"tray.tip" = "Zyrik {version} — {key}: snap"
+"tray.tip_no_key" = "Zyrik {version} — hotkey is not working, snap from the menu"
+"tray.capture" = "Snap"
+"tray.capture_later" = "Snap in 3 s"
+"tray.about" = "About"
+"tray.exit" = "Exit"
+
+"log.captured" = "snapped: {shot}"
+
+"about.text" = """
+Zyrik {version} — screenshots that never leak.
+
+• Never touches the network.
+• Writes nothing to disk except the file you save with Ctrl+S.
+• Puts the shot on the clipboard marked "no history, no cloud".
+• Keeps no settings on disk — only the options in the shortcut.
+
+Snap: {key}.
+Launch options: "{program}" --help"""
+
+"instance.running" = "Zyrik is already running — look for the «о_О» icon in the tray."
+
+"hotkey.busy" = """
+{key} ({option}) is already taken by another program.
+
+Zyrik is running; you can snap from the tray icon menu.
+To use another key, add an option to the shortcut, for example:
+"{program}" {option} Ctrl+Shift+F12"""
+"hotkey.failed" = "Could not register {key} ({option}): {error}"
+
+"err.wrap" = "Launch option error: {error}"
+"err.unknown" = "unknown option \"{arg}\""
+"err.missing_value" = "{option} needs a value"
+"err.duplicate" = "{option} is given twice"
+"err.bad_key" = "{option} {value}: {reason}"
+"err.bad_minutes" = "--clear-clipboard {value}: expected whole minutes from 1 to {max}"
+"err.bad_lang" = "--lang {value}: no such language, available: {langs}"
+"err.same_key" = "{a} and {b} have the same key"
+"err.platform" = "This version of Zyrik runs on Windows only for now."
+
+"key.empty" = "empty combination"
+"key.unknown" = "unknown key \"{part}\""
+"key.no_key" = "only modifiers, a key is needed too"
+"key.two_keys" = "two keys in one combination, use one plus modifiers"
+"key.repeated" = "modifier \"{part}\" is given twice"
+"key.needs_modifier" = "a letter or digit without Ctrl/Alt/Shift/{meta} would steal normal typing"
+
+"help.text" = """
+Zyrik {version} — screenshots that never leak.
+
+Usage: zyrik [options]
+
+  --key <keys>              snap a region (default {default_key})
+  --key-screen <keys>       snap the whole monitor (unassigned by default)
+  --key-window <keys>       snap the active window (unassigned by default)
+  --save-dir <folder>       where Ctrl+S saves (default: Pictures)
+  --clear-clipboard <min>   clear the clipboard after this many minutes if the shot is still there
+  --no-detect               do not look for private data on the shot
+  --lang <{langs}>            language (default: system language, else en)
+  --help                    this help
+
+Keys: modifiers Ctrl, Alt, Shift, {meta} joined with "+" and one key —
+PrtScr, Pause, ScrollLock, Insert, Delete, Home, End, PageUp, PageDown,
+F1…F24, A…Z, 0…9. Letters and digits need a modifier.
+
+Settings are stored nowhere. Windows shortcut, "Target" field:
+"{program}" --key Shift+PrtScr --save-dir "D:\\Shots"
+"""

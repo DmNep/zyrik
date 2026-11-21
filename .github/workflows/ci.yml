@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: --help works
+        shell: bash
+        run: |
+          exe=target/release/zyrik
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          "$exe" --help --lang en | grep -- --key
+          "$exe" --help --lang ru | grep -- --save-dir
+
+  windows-gnu:
+    # так собирается релиз: со значком и сведениями о версии (windres)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - run: cargo test --locked --target x86_64-pc-windows-gnu
+      - run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zyrik-windows
+          path: target/x86_64-pc-windows-gnu/release/zyrik.exe
+
+  offline:
+    # Принцип I: в программе нет сети. Проверяем код и дерево зависимостей.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: No network APIs in the code
+        shell: bash
+        run: |
+          if grep -RInE 'TcpStream|TcpListener|UdpSocket|ToSocketAddrs|reqwest|hyper::|ureq|WinHttp|InternetOpen|HttpClient|WSAStartup|URLSession|NSURL|CFNetwork|libcurl' src build.rs Cargo.toml; then
+            echo "network API is not allowed"
+            exit 1
+          fi
+      - name: No network crates in the dependency tree
+        shell: bash
+        run: |
+          tree=$(cargo tree --locked --target all -e normal,build --prefix none)
+          echo "$tree"
+          if echo "$tree" | grep -E '^(reqwest|hyper|ureq|curl|native-tls|rustls|tokio|mio|socket2|h2|http) '; then
+            echo "network crate is not allowed"
+            exit 1
+          fi
