@@ -66,7 +66,7 @@ fn main() {
         let nonzero = frame.chunks_exact(4).filter(|p| p[0] | p[1] | p[2] != 0).count();
         println!("непустых пикселей в последнем кадре: {:.1}%", nonzero as f64 * 100.0 / (w * h) as f64);
 
-        // затираем кадр, как будет делать Царапыч
+        // затираем кадр, как будет делать Зырик
         frame.iter_mut().for_each(|b| *b = 0);
         std::ptr::write_bytes(bits as *mut u8, 0, len);
 
