@@ -101,9 +101,11 @@ pub trait Platform {
 
     fn hide_overlay(&mut self);
 
-    /// Положить картинку в буфер с пометками «не в историю, не в облако» (FR-004).
-    /// Буфер обмена программа не читает никогда.
-    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem>;
+    /// Положить картинку в буфер с пометками «не в историю, не в облако» (FR-004), одноразово:
+    /// после вставки и отпускания Ctrl/Win буфер очищается (FR-004a, см. `oneshot`).
+    /// Платформа держит картинку у себя, пока её не вставят, и затирает после.
+    /// Содержимое буфера программа не читает никогда.
+    fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem>;
 
     /// Диалог «Сохранить как» в папке `start`. Фаза 4.
     fn save_dialog(&mut self, start: &Path, file_name: &str) -> Result<Option<PathBuf>, Problem>;

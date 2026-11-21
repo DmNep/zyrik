@@ -89,7 +89,7 @@ impl Platform for Fake {
     fn hide_overlay(&mut self) {
         self.overlay = None;
     }
-    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem> {
+    fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem> {
         assert!(self.overlay.is_none(), "буфер — уже после того, как окно спрятано");
         self.clipboard = Some((image.width(), image.height(), image.pixels().to_vec()));
         Ok(())

@@ -152,12 +152,11 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                         let what = shot_name(lang, a.shot);
                         p.hide_overlay();
                         active = None;
-                        match p.set_clipboard_image(&shot) {
+                        let (sw, sh) = (shot.width(), shot.height());
+                        match p.set_clipboard_image(shot) {
                             Ok(()) => p.debug_log(&format!(
-                                "{} {}x{}",
-                                lang.fmt(Msg::LogCaptured, &[("shot", what)]),
-                                shot.width(),
-                                shot.height()
+                                "{} {sw}x{sh}",
+                                lang.fmt(Msg::LogCaptured, &[("shot", what)])
                             )),
                             Err(e) => p.message(
                                 title,
@@ -165,7 +164,7 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                                 true,
                             ),
                         }
-                        // `shot` затирается здесь, при выходе из области видимости
+                        // снимок теперь у платформы: она затрёт его после вставки
                     }
                 }
             }

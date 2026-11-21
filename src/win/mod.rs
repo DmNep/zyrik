@@ -230,7 +230,7 @@ impl Platform for Win {
         overlay::hide(self.overlay);
     }
 
-    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem> {
+    fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem> {
         // владелец буфера — невидимое главное окно: оно живёт всё время работы программы
         clipboard::set_image(self.hwnd, image)
     }
@@ -256,6 +256,10 @@ fn push(c: Command) {
 }
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // буфер обмена: отложенная выдача снимка и одноразовость
+    if let Some(r) = clipboard::handle(hwnd, msg, wparam) {
+        return r;
+    }
     match msg {
         WM_HOTKEY => {
             let shot = with(|s| s.hotkeys.get(wparam.0.wrapping_sub(1)).copied());

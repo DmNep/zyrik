@@ -8,5 +8,6 @@ pub mod args;
 pub mod hotkey;
 pub mod i18n;
 pub mod image;
+pub mod oneshot;
 pub mod platform;
 pub mod session;
