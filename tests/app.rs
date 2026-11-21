@@ -8,7 +8,9 @@ use zyrik::app::{arg_error_text, help_text, run};
 use zyrik::args::{parse, Launch, Options};
 use zyrik::hotkey::Hotkey;
 use zyrik::i18n::Lang;
-use zyrik::platform::{Command, Frame, MenuItem, Platform, Problem, Shot};
+use zyrik::image::Image;
+use zyrik::platform::{Command, Frame, MenuItem, Monitor, Platform, Problem, Shot};
+use zyrik::session::{Button, Cursor, Input, Key, Pt, Rect};
 
 #[derive(Default)]
 struct Fake {
@@ -20,6 +22,24 @@ struct Fake {
     scheduled: Vec<(Command, u32)>,
     messages: RefCell<Vec<(String, bool)>>,
     log: RefCell<Vec<String>>,
+    captures: u32,
+    overlay: Option<(i32, i32, u32, u32)>,
+    presented: u32,
+    cursor: Option<Cursor>,
+    /// что легло в буфер: размер и пиксели
+    clipboard: Option<(u32, u32, Vec<u32>)>,
+}
+
+/// Кадр 400×300 в координатах ОС (-100, 0): у каждого пикселя своё значение.
+fn test_frame() -> Frame {
+    let (w, h) = (400u32, 300u32);
+    let px = (0..w * h).map(|i| 0xFF00_0000 | i).collect();
+    Frame {
+        x: -100,
+        y: 0,
+        image: Image::from_pixels(w, h, px),
+        monitors: vec![Monitor { rect: Rect { x: 0, y: 0, w: 400, h: 300 }, scale: 100 }],
+    }
 }
 
 impl Platform for Fake {
@@ -50,13 +70,29 @@ impl Platform for Fake {
         self.commands.pop_front()
     }
     fn capture(&mut self) -> Result<Frame, Problem> {
-        Err(Problem::NotYet("phase 2"))
+        assert!(self.overlay.is_none(), "снимать, пока на экране наше окно, нельзя");
+        self.captures += 1;
+        Ok(test_frame())
     }
-    fn show_overlay(&mut self, _: &Frame) -> Result<(), Problem> {
-        Err(Problem::NotYet("phase 2"))
+    fn show_overlay(&mut self, x: i32, y: i32, w: u32, h: u32) -> Result<(), Problem> {
+        self.overlay = Some((x, y, w, h));
+        Ok(())
     }
-    fn set_clipboard_image(&mut self, _: u32, _: u32, _: &[u8]) -> Result<(), Problem> {
-        Err(Problem::NotYet("phase 2"))
+    fn present(&mut self, image: &Image) {
+        assert!(self.overlay.is_some());
+        assert_eq!((image.width(), image.height()), (400, 300));
+        self.presented += 1;
+    }
+    fn set_cursor(&mut self, cursor: Cursor) {
+        self.cursor = Some(cursor);
+    }
+    fn hide_overlay(&mut self) {
+        self.overlay = None;
+    }
+    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem> {
+        assert!(self.overlay.is_none(), "буфер — уже после того, как окно спрятано");
+        self.clipboard = Some((image.width(), image.height(), image.pixels().to_vec()));
+        Ok(())
     }
     fn save_dialog(&mut self, _: &Path, _: &str) -> Result<Option<PathBuf>, Problem> {
         Err(Problem::NotYet("phase 4"))
@@ -123,34 +159,133 @@ fn every_configured_hotkey_is_registered() {
 fn busy_key_explains_and_keeps_running() {
     let busy = Hotkey::parse("Shift+PrtScr").unwrap();
     let mut fake = Fake { busy: vec![busy], ..Fake::default() };
-    fake.commands.push_back(Command::Capture(Shot::Region));
+    fake.commands.push_back(Command::CaptureLater(Shot::Region, 250));
     let f = go(fake, &["--key", "Shift+PrtScr"]);
-    assert_eq!(f.messages.borrow().len(), 1);
-    let messages = f.messages.borrow();
-    let (text, error) = &messages[0];
-    assert!(*error);
-    assert!(text.contains("Shift+PrtScr") && text.contains("--key Ctrl+Shift+F12"), "{text}");
-    assert!(f.tray.unwrap().0.contains("не работает"));
+    {
+        let messages = f.messages.borrow();
+        assert_eq!(messages.len(), 1);
+        let (text, error) = &messages[0];
+        assert!(*error);
+        assert!(text.contains("Shift+PrtScr") && text.contains("--key Ctrl+Shift+F12"), "{text}");
+    }
+    assert!(f.tray.as_ref().unwrap().0.contains("не работает"));
     // меню трея продолжает работать
-    assert_eq!(*f.log.borrow(), ["зырнул: область"]);
+    assert_eq!(f.scheduled, [(Command::Capture(Shot::Region), 250)]);
 }
 
 #[test]
-fn commands() {
+fn tray_menu_commands() {
     let mut fake = Fake::default();
     fake.commands.extend([
-        Command::Capture(Shot::Region),
-        Command::CaptureLater(Shot::Region, 3),
+        Command::CaptureLater(Shot::Region, 3000),
         Command::About,
         Command::Quit,
         Command::Capture(Shot::Screen), // после «Выхода» уже не обрабатывается
     ]);
     let f = go(fake, &[]);
-    assert_eq!(*f.log.borrow(), ["зырнул: область"]);
     assert_eq!(f.scheduled, [(Command::Capture(Shot::Region), 3000)]);
     assert_eq!(f.messages.borrow().len(), 1);
     assert!(f.messages.borrow()[0].0.contains("не утекают"));
     assert_eq!(f.commands.len(), 1);
+    assert_eq!(f.captures, 0);
+}
+
+fn ov(i: Input) -> Command {
+    Command::Overlay(i)
+}
+fn left_down(x: i32, y: i32) -> Command {
+    ov(Input::Down(Button::Left, Pt { x, y }))
+}
+fn left_up(x: i32, y: i32) -> Command {
+    ov(Input::Up(Button::Left, Pt { x, y }))
+}
+fn key(k: Key) -> Command {
+    ov(Input::Key { key: k, shift: false, ctrl: false })
+}
+
+#[test]
+fn hotkey_opens_overlay_over_whole_virtual_screen() {
+    let mut fake = Fake::default();
+    fake.commands.push_back(Command::Capture(Shot::Region));
+    let f = go(fake, &[]);
+    assert_eq!(f.captures, 1);
+    // после выхода из цикла окно спрятано
+    assert_eq!(f.overlay, None);
+    assert_eq!(f.presented, 1);
+    assert_eq!(f.cursor, Some(Cursor::Cross));
+    assert!(f.log.borrow().iter().any(|l| l.contains("SC-001")));
+}
+
+#[test]
+fn select_and_enter_puts_exact_pixels_on_clipboard() {
+    let mut fake = Fake::default();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        ov(Input::Move(Pt { x: 60, y: 50 })),
+        left_up(110, 70),
+        key(Key::Enter),
+    ]);
+    let f = go(fake, &[]);
+    let (w, h, px) = f.clipboard.expect("снимок в буфере");
+    assert_eq!((w, h), (100, 50));
+    let frame = test_frame();
+    let want = frame.image.crop(Rect { x: 10, y: 20, w: 100, h: 50 });
+    assert_eq!(px, want.pixels());
+    assert_eq!(f.overlay, None);
+    assert!(f.log.borrow().iter().any(|l| l.contains("зырнул: область 100x50")));
+    assert!(f.messages.borrow().is_empty());
+}
+
+#[test]
+fn esc_closes_without_touching_clipboard() {
+    let mut fake = Fake::default();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        left_up(110, 70),
+        key(Key::Esc),
+    ]);
+    let f = go(fake, &[]);
+    assert!(f.clipboard.is_none());
+    assert_eq!(f.overlay, None);
+}
+
+#[test]
+fn hotkey_while_selecting_is_ignored_then_works_again() {
+    let mut fake = Fake::default();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        Command::Capture(Shot::Region),
+        Command::CaptureLater(Shot::Region, 3000),
+        key(Key::Esc),
+        Command::Capture(Shot::Region),
+    ]);
+    let f = go(fake, &[]);
+    assert_eq!(f.captures, 2, "второе нажатие при открытом выделении не снимает");
+    assert!(f.scheduled.is_empty());
+}
+
+#[test]
+fn input_without_overlay_is_ignored() {
+    let mut fake = Fake::default();
+    fake.commands.extend([left_down(1, 1), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    assert!(f.clipboard.is_none());
+    assert_eq!(f.presented, 0);
+}
+
+#[test]
+fn cursor_follows_selection() {
+    let mut fake = Fake::default();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        left_up(110, 70),
+        ov(Input::Move(Pt { x: 50, y: 40 })),
+    ]);
+    let f = go(fake, &[]);
+    assert_eq!(f.cursor, Some(Cursor::Move));
 }
 
 #[test]

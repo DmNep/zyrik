@@ -1,7 +1,10 @@
 //! Прослойка Windows. Состояние окна — в thread_local: оконная процедура вызывается ОС
 //! без нашего `self`, а всё работает в одном потоке.
 
+mod capture;
+mod clipboard;
 mod hotkey;
+mod overlay;
 mod single_instance;
 mod tray;
 
@@ -19,11 +22,12 @@ use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CON
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use zyrik::hotkey::Hotkey;
+use zyrik::image::Image;
 use zyrik::platform::{Command, Frame, MenuItem, Platform, Problem, Shot};
+use zyrik::session::Cursor;
 
 const CLASS: PCWSTR = w!("ZyrikWindow");
 
-#[derive(Default)]
 struct Shared {
     queue: VecDeque<Command>,
     menu: Vec<MenuItem>,
@@ -36,6 +40,26 @@ struct Shared {
     tray_shown: bool,
     taskbar_created: u32,
     ending: bool,
+    /// курсор над окном выделения
+    cursor: Cursor,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Shared {
+            queue: VecDeque::new(),
+            menu: Vec::new(),
+            hotkeys: Vec::new(),
+            timers: Vec::new(),
+            next_timer: 0,
+            tip: String::new(),
+            icon: HICON::default(),
+            tray_shown: false,
+            taskbar_created: 0,
+            ending: false,
+            cursor: Cursor::Cross,
+        }
+    }
 }
 
 thread_local! {
@@ -52,6 +76,7 @@ pub fn utf16(text: &str) -> Vec<u16> {
 
 pub struct Win {
     hwnd: HWND,
+    overlay: HWND,
     instance: HINSTANCE,
     guard: Option<single_instance::Guard>,
 }
@@ -89,7 +114,8 @@ impl Win {
             )
             .map_err(|e| e.message())?;
             with(|s| s.taskbar_created = RegisterWindowMessageW(w!("TaskbarCreated")));
-            Ok(Win { hwnd, instance, guard: None })
+            let overlay = overlay::create(instance)?;
+            Ok(Win { hwnd, overlay, instance, guard: None })
         }
     }
 }
@@ -104,6 +130,7 @@ impl Drop for Win {
             tray::remove(self.hwnd);
         }
         unsafe {
+            let _ = DestroyWindow(self.overlay);
             let _ = DestroyWindow(self.hwnd);
         }
         self.guard = None;
@@ -181,15 +208,31 @@ impl Platform for Win {
     }
 
     fn capture(&mut self) -> Result<Frame, Problem> {
-        Err(Problem::NotYet("capture: фаза 2"))
+        capture::capture()
     }
 
-    fn show_overlay(&mut self, _frame: &Frame) -> Result<(), Problem> {
-        Err(Problem::NotYet("overlay: фаза 2"))
+    fn show_overlay(&mut self, x: i32, y: i32, width: u32, height: u32) -> Result<(), Problem> {
+        overlay::show(self.overlay, x, y, width, height)
     }
 
-    fn set_clipboard_image(&mut self, _w: u32, _h: u32, _rgba: &[u8]) -> Result<(), Problem> {
-        Err(Problem::NotYet("clipboard: фаза 2"))
+    fn present(&mut self, image: &Image) {
+        overlay::present(self.overlay, image);
+    }
+
+    fn set_cursor(&mut self, cursor: Cursor) {
+        let changed = with(|s| std::mem::replace(&mut s.cursor, cursor) != cursor);
+        if changed {
+            overlay::apply_cursor(cursor);
+        }
+    }
+
+    fn hide_overlay(&mut self) {
+        overlay::hide(self.overlay);
+    }
+
+    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem> {
+        // владелец буфера — невидимое главное окно: оно живёт всё время работы программы
+        clipboard::set_image(self.hwnd, image)
     }
 
     fn save_dialog(&mut self, _start: &Path, _name: &str) -> Result<Option<PathBuf>, Problem> {

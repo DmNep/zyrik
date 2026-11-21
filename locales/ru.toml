@@ -28,6 +28,9 @@
 Зырнуть: {key}.
 Параметры запуска: "{program}" --help"""
 
+"capture.failed" = "Не удалось снять экран: {error}"
+"clipboard.failed" = "Не удалось положить снимок в буфер обмена: {error}"
+
 "instance.running" = "Зырик уже запущен — значок «о_О» в трее."
 
 "hotkey.busy" = """

@@ -28,6 +28,9 @@ Zyrik {version} — screenshots that never leak.
 Snap: {key}.
 Launch options: "{program}" --help"""
 
+"capture.failed" = "Could not capture the screen: {error}"
+"clipboard.failed" = "Could not put the shot on the clipboard: {error}"
+
 "instance.running" = "Zyrik is already running — look for the «о_О» icon in the tray."
 
 "hotkey.busy" = """

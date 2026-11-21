@@ -1,13 +1,20 @@
 //! Главный цикл: общий для всех ОС, проверяется тестами с поддельной платформой.
 
+use std::time::Instant;
+
+use crate::annot::render;
 use crate::args::{program_path, ArgError, Options, MAX_CLEAR_MINUTES};
-use crate::hotkey::{KeyError, META_NAME, Hotkey};
+use crate::hotkey::{Hotkey, KeyError, META_NAME};
 use crate::i18n::{Lang, Msg};
-use crate::platform::{Command, MenuItem, Platform, Problem, Shot};
+use crate::image::Image;
+use crate::platform::{Command, Frame, MenuItem, Platform, Problem, Shot};
+use crate::session::{Cursor, Input, Outcome, Session};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Задержка пункта «Зырнуть через 3 с»
-pub const LATER_SECS: u32 = 3;
+pub const LATER_MS: u32 = 3000;
+/// Пункт меню «Зырнуть» снимает не сразу: даём меню трея погаснуть, иначе оно попадёт в кадр.
+pub const MENU_FADE_MS: u32 = 250;
 
 pub fn help_text(lang: Lang) -> String {
     lang.fmt(
@@ -69,10 +76,13 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
     }
 
     let menu = [
-        MenuItem { text: lang.tr(Msg::TrayCapture).into(), command: Command::Capture(Shot::Region) },
+        MenuItem {
+            text: lang.tr(Msg::TrayCapture).into(),
+            command: Command::CaptureLater(Shot::Region, MENU_FADE_MS),
+        },
         MenuItem {
             text: lang.tr(Msg::TrayCaptureLater).into(),
-            command: Command::CaptureLater(Shot::Region, LATER_SECS),
+            command: Command::CaptureLater(Shot::Region, LATER_MS),
         },
         MenuItem { text: lang.tr(Msg::TrayAbout).into(), command: Command::About },
         MenuItem { text: lang.tr(Msg::TrayExit).into(), command: Command::Quit },
@@ -109,13 +119,56 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
         p.message(title, &text, true);
     }
 
+    // Открытый режим выделения. При удалении кадр и холст затираются (Image::drop).
+    let mut active: Option<Active> = None;
     while let Some(cmd) = p.next_command() {
         match cmd {
             Command::Capture(shot) => {
-                // Фаза 2: захват → оверлей. Пока — отметка, что клавиша дошла.
-                p.debug_log(&lang.fmt(Msg::LogCaptured, &[("shot", shot_name(lang, shot))]));
+                // T028: повторное нажатие при открытом выделении ничего не делает
+                if active.is_none() {
+                    active = start(p, lang, shot);
+                }
             }
-            Command::CaptureLater(shot, secs) => p.schedule(Command::Capture(shot), secs * 1000),
+            Command::CaptureLater(shot, ms) => {
+                if active.is_none() {
+                    p.schedule(Command::Capture(shot), ms);
+                }
+            }
+            Command::Overlay(input) => {
+                let Some(a) = active.as_mut() else { continue };
+                let outcome = a.session.input(input);
+                if let Input::Down(_, pt) | Input::Move(pt) | Input::Up(_, pt) = input {
+                    p.set_cursor(a.session.cursor_at(pt));
+                }
+                match outcome {
+                    Outcome::Nothing => {}
+                    Outcome::Redraw => a.redraw(p),
+                    Outcome::Cancel => {
+                        p.hide_overlay();
+                        active = None;
+                    }
+                    Outcome::Confirm(rect) => {
+                        let shot = a.frame.image.crop(rect);
+                        let what = shot_name(lang, a.shot);
+                        p.hide_overlay();
+                        active = None;
+                        match p.set_clipboard_image(&shot) {
+                            Ok(()) => p.debug_log(&format!(
+                                "{} {}x{}",
+                                lang.fmt(Msg::LogCaptured, &[("shot", what)]),
+                                shot.width(),
+                                shot.height()
+                            )),
+                            Err(e) => p.message(
+                                title,
+                                &lang.fmt(Msg::ClipboardFailed, &[("error", &format!("{e:?}"))]),
+                                true,
+                            ),
+                        }
+                        // `shot` затирается здесь, при выходе из области видимости
+                    }
+                }
+            }
             Command::About => {
                 let text = lang.fmt(
                     Msg::AboutText,
@@ -126,4 +179,51 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
             Command::Quit => break,
         }
     }
+    if active.is_some() {
+        p.hide_overlay();
+    }
+}
+
+struct Active {
+    shot: Shot,
+    frame: Frame,
+    session: Session,
+    /// Сюда собирается картинка оверлея; размер как у кадра
+    canvas: Image,
+}
+
+impl Active {
+    fn redraw<P: Platform>(&mut self, p: &mut P) {
+        render::overlay(&self.frame.image, &self.session, &mut self.canvas);
+        p.present(&self.canvas);
+    }
+}
+
+/// Снять экран и открыть выделение. Захват — первым делом, пока на экране ничего нашего.
+fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
+    let t0 = Instant::now();
+    let frame = match p.capture() {
+        Ok(f) => f,
+        Err(e) => {
+            let text = lang.fmt(Msg::CaptureFailed, &[("error", &format!("{e:?}"))]);
+            p.message(lang.tr(Msg::AppName), &text, true);
+            return None;
+        }
+    };
+    let captured = t0.elapsed();
+    // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
+    let (w, h) = (frame.image.width(), frame.image.height());
+    let mut a = Active { shot, session: Session::new(w, h), canvas: Image::new(w, h), frame };
+    if let Err(e) = p.show_overlay(a.frame.x, a.frame.y, w, h) {
+        p.message(lang.tr(Msg::AppName), &format!("{e:?}"), true);
+        return None;
+    }
+    p.set_cursor(Cursor::Cross);
+    a.redraw(p);
+    p.debug_log(&format!(
+        "{w}x{h}: снято за {} мс, выделение на экране через {} мс (SC-001: ≤ 200)",
+        captured.as_millis(),
+        t0.elapsed().as_millis()
+    ));
+    Some(a)
 }

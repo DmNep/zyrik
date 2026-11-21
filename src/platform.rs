@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::hotkey::Hotkey;
+use crate::image::Image;
+use crate::session::{Cursor, Input, Rect};
 
 /// Что снимаем.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +21,10 @@ pub enum Shot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Capture(Shot),
-    /// Снять через `secs` секунд (история 6, пункт меню трея)
+    /// Снять через `ms` миллисекунд (пункты меню трея, история 6)
     CaptureLater(Shot, u32),
+    /// Мышь и клавиатура в режиме выделения
+    Overlay(Input),
     About,
     Quit,
 }
@@ -37,14 +41,22 @@ pub enum Problem {
     NotYet(&'static str),
 }
 
-/// Кадр экрана в памяти, RGBA. Затирается после использования (FR-009).
+/// Монитор в координатах кадра (физические пиксели).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Monitor {
+    pub rect: Rect,
+    /// Масштаб, % (100, 125, 150…)
+    pub scale: u32,
+}
+
+/// Снимок всех мониторов в памяти. Пиксели затираются при удалении (FR-009).
+#[derive(Debug)]
 pub struct Frame {
-    /// Левый верхний угол виртуального экрана
+    /// Левый верхний угол виртуального экрана в координатах ОС
     pub x: i32,
     pub y: i32,
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
+    pub image: Image,
+    pub monitors: Vec<Monitor>,
 }
 
 /// Пункт меню трея.
@@ -76,14 +88,22 @@ pub trait Platform {
     /// Ждать следующую команду. `None` — ОС просит завершиться.
     fn next_command(&mut self) -> Option<Command>;
 
-    /// Снять все мониторы в память. Фаза 2.
+    /// Снять все мониторы в память — сразу, в момент вызова.
     fn capture(&mut self) -> Result<Frame, Problem>;
 
-    /// Показать оверлей выделения поверх кадра. Фаза 2.
-    fn show_overlay(&mut self, frame: &Frame) -> Result<(), Problem>;
+    /// Показать окно выделения поверх всех мониторов (координаты ОС) и забрать клавиатуру.
+    fn show_overlay(&mut self, x: i32, y: i32, width: u32, height: u32) -> Result<(), Problem>;
 
-    /// Положить картинку в буфер с пометками «не в историю, не в облако» (FR-004). Фаза 2.
-    fn set_clipboard_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<(), Problem>;
+    /// Вывести готовую картинку в окно выделения, пиксель в пиксель.
+    fn present(&mut self, image: &Image);
+
+    fn set_cursor(&mut self, cursor: Cursor);
+
+    fn hide_overlay(&mut self);
+
+    /// Положить картинку в буфер с пометками «не в историю, не в облако» (FR-004).
+    /// Буфер обмена программа не читает никогда.
+    fn set_clipboard_image(&mut self, image: &Image) -> Result<(), Problem>;
 
     /// Диалог «Сохранить как» в папке `start`. Фаза 4.
     fn save_dialog(&mut self, start: &Path, file_name: &str) -> Result<Option<PathBuf>, Problem>;
