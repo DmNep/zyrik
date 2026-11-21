@@ -45,10 +45,17 @@ if osascript -e 'tell application "System Events" to key code 19 using {command 
       [[ "$t" == *public.png* && "$t" == *org.nspasteboard.ConcealedType* && "$t" == *org.nspasteboard.TransientType* ]]         && ok "в буфере обещан PNG с пометками Transient и Concealed" || bad "типы в буфере: $t"
       n=$(png); [ "$n" = 0 ] && ok "без Cmd (фоновый читатель) PNG не отдаётся" || bad "без Cmd отдано $n байт"
       cliclick kd:cmd; sleep 0.2
+      echo "флаги модификаторов, которые видит другой процесс: $(osascript -l JavaScript -e 'ObjC.import("AppKit"); $.NSEvent.modifierFlags' 2>&1)"
       n=$(png); echo "с Cmd получено байт: $n"
       cliclick ku:cmd; sleep 1
       [ "${n:-0}" -gt 1000 ] 2>/dev/null && ok "с Cmd PNG отдаётся ($n байт)" || bad "с Cmd PNG не отдан ($n)"
       t=$(types); [[ "$t" != *public.png* ]] && ok "отпустили Cmd — буфер очищен" || bad "после отпускания Cmd в буфере всё ещё: $t"
+      # тот же опыт на свежем снимке: первый же запрос — с Cmd
+      osascript -e 'tell application "System Events" to key code 19 using {command down, shift down}'; sleep 1.5
+      cliclick dd:200,200 m:400,300 du:600,400; sleep 0.3
+      osascript -e 'tell application "System Events" to key code 36'; sleep 0.5
+      cliclick kd:cmd; sleep 0.2; n=$(png); cliclick ku:cmd; sleep 1
+      echo "свежий снимок, первый запрос с Cmd: $n байт; типы после отпускания: $(types)"
     else
       na "выделение мышью: нет cliclick"
     fi

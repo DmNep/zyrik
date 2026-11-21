@@ -373,11 +373,15 @@ fn modifier_held() -> bool {
 /// с зажатым Cmd/Ctrl (Cmd+V), как фоновым читателям в Windows не отдаём.
 fn provide(item: &NSPasteboardItem, ty: &NSString) {
     if ty != unsafe { NSPasteboardTypePNG } {
+        eprintln!("zyrik: буфер: просят {ty} — не отдаём");
         return;
     }
+    let held = modifier_held();
     let png = with(|s| {
         s.clip.image.as_ref()?;
-        match s.clip.oneshot.requested(false, modifier_held()) {
+        let answer = s.clip.oneshot.requested(false, held);
+        eprintln!("zyrik: буфер: просят PNG, Cmd/Ctrl {}, ответ {answer:?}", if held { "зажат" } else { "не зажат" });
+        match answer {
             Answer::Refuse => None,
             a => {
                 if a == Answer::GiveAndWatch {
