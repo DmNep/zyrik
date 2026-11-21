@@ -1,8 +1,10 @@
 //! Главный цикл: общий для всех ОС, проверяется тестами с поддельной платформой.
 
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::annot::render;
+use crate::export;
 use crate::args::{program_path, ArgError, Options, MAX_CLEAR_MINUTES};
 use crate::hotkey::{Hotkey, KeyError, META_NAME};
 use crate::i18n::{Lang, Msg};
@@ -119,6 +121,8 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
         p.message(title, &text, true);
     }
 
+    // «Последняя папка» для Ctrl+S — только в памяти (история 3).
+    let mut last_dir: Option<PathBuf> = opts.save_dir.clone().or_else(|| p.pictures_dir());
     // Открытый режим выделения. При удалении кадр и холст затираются (Image::drop).
     let mut active: Option<Active> = None;
     while let Some(cmd) = p.next_command() {
@@ -148,7 +152,7 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                         active = None;
                     }
                     Outcome::Confirm(rect) => {
-                        let shot = a.frame.image.crop(rect);
+                        let shot = a.bake(rect);
                         let what = shot_name(lang, a.shot);
                         p.hide_overlay();
                         active = None;
@@ -165,6 +169,19 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                             ),
                         }
                         // снимок теперь у платформы: она затрёт его после вставки
+                    }
+                    Outcome::Save(rect) | Outcome::SaveAs(rect) => {
+                        let dialog = matches!(outcome, Outcome::SaveAs(_));
+                        let shot = a.bake(rect);
+                        if let Some(path) = save(p, lang, &shot, last_dir.as_deref(), dialog) {
+                            p.debug_log(&lang.fmt(Msg::LogSaved, &[("path", &path.display().to_string())]));
+                            last_dir = path.parent().map(Path::to_path_buf);
+                            p.hide_overlay();
+                            active = None;
+                        } else if let Some(a) = active.as_mut() {
+                            // передумал или не вышло — снимок не теряется, выделение остаётся
+                            a.redraw(p);
+                        }
                     }
                 }
             }
@@ -185,6 +202,7 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
 
 struct Active {
     shot: Shot,
+    lang: Lang,
     frame: Frame,
     session: Session,
     /// Сюда собирается картинка оверлея; размер как у кадра
@@ -193,8 +211,45 @@ struct Active {
 
 impl Active {
     fn redraw<P: Platform>(&mut self, p: &mut P) {
-        render::overlay(&self.frame.image, &self.session, &mut self.canvas);
+        render::overlay(&self.frame.image, &self.session, &mut self.canvas, self.lang);
         p.present(&self.canvas);
+    }
+
+    /// Зона с пометками — то, что уходит в буфер или файл.
+    fn bake(&self, rect: crate::session::Rect) -> Image {
+        render::bake(&self.frame.image, rect, self.session.marks().items(), self.session.live().as_ref())
+    }
+}
+
+/// Ctrl+S — сразу в последнюю папку; дискета, недоступная папка или её отсутствие — диалог.
+/// Возвращает путь сохранённого файла; `None` — не сохранили (передумал или ошибка, о ней сказано).
+fn save<P: Platform>(p: &mut P, lang: Lang, shot: &Image, last_dir: Option<&Path>, dialog: bool) -> Option<PathBuf> {
+    let title = lang.tr(Msg::AppName);
+    let png = export::encode_png(shot);
+    let name = export::file_name(title, p.local_time());
+    if !dialog {
+        if let Some(dir) = last_dir {
+            match export::save_unique(dir, &name, &png) {
+                Ok(path) => return Some(path),
+                Err(e) => p.debug_log(&format!("{}: {e} — открываю диалог", dir.display())),
+            }
+        }
+    }
+    let path = match p.save_dialog(last_dir, &name) {
+        Ok(Some(path)) => path,
+        Ok(None) => return None,
+        Err(e) => {
+            p.message(title, &lang.fmt(Msg::SaveFailed, &[("error", &format!("{e:?}"))]), true);
+            return None;
+        }
+    };
+    match export::save_to(&path, &png) {
+        Ok(()) => Some(path),
+        Err(e) => {
+            let error = format!("{}: {e}", path.display());
+            p.message(title, &lang.fmt(Msg::SaveFailed, &[("error", &error)]), true);
+            None
+        }
     }
 }
 
@@ -212,7 +267,8 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
     let captured = t0.elapsed();
     // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
     let (w, h) = (frame.image.width(), frame.image.height());
-    let mut a = Active { shot, session: Session::new(w, h), canvas: Image::new(w, h), frame };
+    let session = Session::with_monitors(w, h, frame.monitors.clone());
+    let mut a = Active { shot, lang, session, canvas: Image::new(w, h), frame };
     if let Err(e) = p.show_overlay(a.frame.x, a.frame.y, w, h) {
         p.message(lang.tr(Msg::AppName), &format!("{e:?}"), true);
         return None;

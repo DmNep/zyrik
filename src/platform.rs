@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::export::Stamp;
 use crate::hotkey::Hotkey;
 use crate::image::Image;
 use crate::session::{Cursor, Input, Rect};
@@ -107,8 +108,15 @@ pub trait Platform {
     /// Содержимое буфера программа не читает никогда.
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem>;
 
-    /// Диалог «Сохранить как» в папке `start`. Фаза 4.
-    fn save_dialog(&mut self, start: &Path, file_name: &str) -> Result<Option<PathBuf>, Problem>;
+    /// Диалог «Сохранить как…» поверх окна выделения, начиная с папки `start`.
+    /// `None` — человек передумал. Ничего не запоминает (FR-007).
+    fn save_dialog(&mut self, start: Option<&Path>, file_name: &str) -> Result<Option<PathBuf>, Problem>;
+
+    /// Системная папка «Изображения» — последняя папка по умолчанию (история 3).
+    fn pictures_dir(&self) -> Option<PathBuf>;
+
+    /// Местные дата и время — для имени файла.
+    fn local_time(&self) -> Stamp;
 
     /// Окно с сообщением; в консоли — текст в неё.
     fn message(&self, title: &str, text: &str, error: bool);

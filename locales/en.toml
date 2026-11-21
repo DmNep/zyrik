@@ -41,6 +41,22 @@ To use another key, add an option to the shortcut, for example:
 "{program}" {option} Ctrl+Shift+F12"""
 "hotkey.failed" = "Could not register {key} ({option}): {error}"
 
+
+"tip.pen" = "Pen (P)"
+"tip.line" = "Line (L), Shift snaps"
+"tip.arrow" = "Arrow (A), Shift snaps"
+"tip.rect" = "Rectangle (R), Shift for square"
+"tip.text" = "Text (T)"
+"tip.red" = "Red (C)"
+"tip.blue" = "Blue (C)"
+"tip.undo" = "Undo (Ctrl+Z)"
+"tip.save" = "Save as… (Ctrl+S saves right away)"
+"tip.copy" = "To clipboard (Enter)"
+"tip.close" = "Close (Esc)"
+
+"save.failed" = "Could not save the shot: {error}"
+"log.saved" = "saved: {path}"
+
 "err.wrap" = "Launch option error: {error}"
 "err.unknown" = "unknown option \"{arg}\""
 "err.missing_value" = "{option} needs a value"

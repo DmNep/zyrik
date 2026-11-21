@@ -11,3 +11,5 @@ pub mod image;
 pub mod oneshot;
 pub mod platform;
 pub mod session;
+pub mod toolbar;
+pub mod export;

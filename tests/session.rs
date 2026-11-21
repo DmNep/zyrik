@@ -176,8 +176,8 @@ fn enter_and_ctrl_c_confirm() {
     let mut s = s();
     drag(&mut s, (10, 20), (110, 70));
     assert_eq!(key(&mut s, Key::Enter), Outcome::Confirm(r(10, 20, 100, 50)));
-    assert_eq!(key_mod(&mut s, Key::C, false, true), Outcome::Confirm(r(10, 20, 100, 50)));
-    assert_eq!(key(&mut s, Key::C), Outcome::Nothing, "просто C — не копирование");
+    assert_eq!(key_mod(&mut s, Key::Letter('C'), false, true), Outcome::Confirm(r(10, 20, 100, 50)));
+    assert!(!matches!(key(&mut s, Key::Letter('C')), Outcome::Confirm(_)), "просто C — смена цвета, не копирование");
 }
 
 #[test]
@@ -203,4 +203,173 @@ fn double_click_inside_confirms() {
     drag(&mut s, (10, 20), (110, 70));
     assert_eq!(s.input(Input::DoubleClick(pt(50, 50))), Outcome::Confirm(r(10, 20, 100, 50)));
     assert_eq!(s.input(Input::DoubleClick(pt(500, 500))), Outcome::Nothing);
+}
+
+// ---------- фаза 3: пометки, подписи, панель ----------
+
+use zyrik::annot::{Color, Shape, Tool, P};
+use zyrik::toolbar::Button as Bar;
+
+fn selected() -> Session {
+    let mut s = s();
+    drag(&mut s, (100, 100), (600, 400));
+    s
+}
+
+fn click_bar(s: &mut Session, b: Bar) -> Outcome {
+    let r = s.toolbar().unwrap().button_rect(b).unwrap();
+    s.input(Input::Down(Button::Left, pt(r.x + r.w / 2, r.y + r.h / 2)))
+}
+
+#[test]
+fn toolbar_appears_with_selection_and_picks_tools() {
+    let mut s = s();
+    assert!(s.toolbar().is_none());
+    drag(&mut s, (100, 100), (600, 400));
+    assert!(s.toolbar().is_some());
+    assert_eq!(click_bar(&mut s, Bar::Tool(Tool::Arrow)), Outcome::Redraw);
+    assert_eq!(s.tool(), Some(Tool::Arrow));
+    click_bar(&mut s, Bar::Tool(Tool::Arrow));
+    assert_eq!(s.tool(), None, "повторный щелчок снимает инструмент");
+    click_bar(&mut s, Bar::Color(Color::Blue));
+    assert_eq!(s.color(), Color::Blue);
+    assert_eq!(s.selection(), Some(r(100, 100, 500, 300)), "щелчок по панели не трогает зону");
+}
+
+#[test]
+fn toolbar_buttons_finish() {
+    let mut s = selected();
+    assert_eq!(click_bar(&mut s, Bar::Copy), Outcome::Confirm(r(100, 100, 500, 300)));
+    assert_eq!(click_bar(&mut s, Bar::Save), Outcome::SaveAs(r(100, 100, 500, 300)));
+    assert_eq!(click_bar(&mut s, Bar::Close), Outcome::Cancel);
+}
+
+#[test]
+fn drawing_an_arrow_with_current_color_and_width() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('A'));
+    key(&mut s, Key::Letter('C')); // синий
+    s.input(Input::Wheel(3, pt(200, 200))); // 4 → 7
+    assert_eq!(s.preview().map(|p| p.1), Some(7.0), "превью толщины у курсора");
+    drag(&mut s, (200, 200), (400, 300));
+    let m = &s.marks().items()[0];
+    assert_eq!(m.shape, Shape::Arrow(P::new(200.0, 200.0), P::new(400.0, 300.0)));
+    assert_eq!(m.color, Color::Blue);
+    assert_eq!(m.width, 7.0);
+    assert_eq!(s.selection(), Some(r(100, 100, 500, 300)), "рисование не двигает зону");
+    mv(&mut s, 300, 300);
+    assert!(s.preview().is_none(), "превью гаснет, когда мышь двинулась");
+}
+
+#[test]
+fn shift_snaps_line_while_drawing() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('L'));
+    s.input(Input::Shift(true));
+    drag(&mut s, (200, 200), (400, 212));
+    match &s.marks().items()[0].shape {
+        Shape::Line(a, b) => assert!((a.y - b.y).abs() < 0.01, "горизонталь: {a:?} {b:?}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn pen_collects_points_and_undo_redo() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('P'));
+    down(&mut s, 150, 150);
+    for i in 1..10 {
+        mv(&mut s, 150 + i * 5, 150 + i);
+    }
+    up(&mut s, 200, 160);
+    assert!(matches!(&s.marks().items()[0].shape, Shape::Pen(pts) if pts.len() >= 10));
+    assert_eq!(key_mod(&mut s, Key::Letter('Z'), false, true), Outcome::Redraw);
+    assert!(s.marks().is_empty());
+    assert_eq!(key_mod(&mut s, Key::Letter('Y'), false, true), Outcome::Redraw);
+    assert_eq!(s.marks().items().len(), 1);
+    key_mod(&mut s, Key::Letter('Z'), false, true);
+    assert_eq!(key_mod(&mut s, Key::Letter('Z'), true, true), Outcome::Redraw, "Ctrl+Shift+Z — вернуть");
+    assert_eq!(s.marks().items().len(), 1);
+}
+
+#[test]
+fn with_tool_handles_still_resize_and_outside_starts_new_zone() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('R'));
+    drag(&mut s, (600, 400), (700, 450)); // правый нижний угол
+    assert_eq!(s.selection(), Some(r(100, 100, 600, 350)));
+    assert!(s.marks().is_empty());
+}
+
+#[test]
+fn typing_a_caption() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('T'));
+    assert_eq!(s.cursor_at(pt(300, 300)), Cursor::Text);
+    down(&mut s, 300, 300);
+    up(&mut s, 300, 300);
+    for c in "Тут баг!".chars() {
+        s.input(Input::Char(c));
+    }
+    // буквы-клавиши во время набора не переключают инструменты
+    key(&mut s, Key::Letter('L'));
+    assert_eq!(s.tool(), Some(Tool::Text));
+    key(&mut s, Key::Backspace);
+    s.input(Input::Wheel(2, pt(300, 300)));
+    assert_eq!(s.editing().unwrap().text, "Тут баг");
+    assert_eq!(key(&mut s, Key::Enter), Outcome::Redraw, "Enter завершает подпись, а не снимок");
+    match &s.marks().items()[0].shape {
+        Shape::Text { text, size, at } => {
+            assert_eq!(text, "Тут баг");
+            assert_eq!(*size, 28.0);
+            assert_eq!(*at, P::new(300.0, 300.0));
+        }
+        other => panic!("{other:?}"),
+    }
+    // второй Enter — уже снимок
+    assert_eq!(key(&mut s, Key::Enter), Outcome::Confirm(r(100, 100, 500, 300)));
+}
+
+#[test]
+fn esc_drops_caption_not_the_shot() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('T'));
+    down(&mut s, 300, 300);
+    s.input(Input::Char('x'));
+    assert_eq!(key(&mut s, Key::Esc), Outcome::Redraw);
+    assert!(s.editing().is_none());
+    assert!(s.marks().is_empty());
+    assert_eq!(key(&mut s, Key::Esc), Outcome::Cancel);
+}
+
+#[test]
+fn ctrl_c_and_ctrl_s_take_the_caption_along() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('T'));
+    down(&mut s, 300, 300);
+    s.input(Input::Char('!'));
+    assert_eq!(key_mod(&mut s, Key::Letter('S'), false, true), Outcome::Save(r(100, 100, 500, 300)));
+    assert_eq!(s.marks().items().len(), 1, "подпись вошла в снимок");
+}
+
+#[test]
+fn clicking_elsewhere_finishes_caption() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('T'));
+    down(&mut s, 300, 300);
+    s.input(Input::Char('a'));
+    down(&mut s, 400, 350);
+    assert_eq!(s.marks().items().len(), 1);
+    assert!(s.editing().is_some(), "новый щелчок — новая подпись");
+}
+
+#[test]
+fn wheel_sets_text_size_for_text_tool() {
+    let mut s = selected();
+    key(&mut s, Key::Letter('T'));
+    s.input(Input::Wheel(-100, pt(1, 1)));
+    assert_eq!(s.text_size(), zyrik::annot::MIN_TEXT);
+    key(&mut s, Key::Letter('T'));
+    s.input(Input::Wheel(100, pt(1, 1)));
+    assert_eq!(s.stroke(), zyrik::annot::MAX_WIDTH);
 }

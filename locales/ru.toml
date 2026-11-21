@@ -41,6 +41,22 @@
 "{program}" {option} Ctrl+Shift+F12"""
 "hotkey.failed" = "Не удалось назначить клавишу {key} ({option}): {error}"
 
+
+"tip.pen" = "Карандаш (P)"
+"tip.line" = "Линия (L), с Shift — ровно"
+"tip.arrow" = "Стрелка (A), с Shift — ровно"
+"tip.rect" = "Прямоугольник (R), с Shift — квадрат"
+"tip.text" = "Подпись (T)"
+"tip.red" = "Красный (C)"
+"tip.blue" = "Синий (C)"
+"tip.undo" = "Отменить (Ctrl+Z)"
+"tip.save" = "Сохранить как… (Ctrl+S — сразу, без диалога)"
+"tip.copy" = "В буфер (Enter)"
+"tip.close" = "Закрыть (Esc)"
+
+"save.failed" = "Не удалось сохранить снимок: {error}"
+"log.saved" = "сохранил: {path}"
+
 "err.wrap" = "Ошибка в параметрах запуска: {error}"
 "err.unknown" = "непонятный параметр «{arg}»"
 "err.missing_value" = "после {option} нужно значение"

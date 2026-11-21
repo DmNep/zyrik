@@ -3,10 +3,10 @@
 //! мышь и клавиши уходят в ядро, готовую картинку ядро присылает через `present`.
 
 use windows::core::w;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_DOWN,
+    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DOWN,
     VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -114,6 +114,8 @@ pub fn hide(hwnd: HWND) {
 fn cursor_id(c: Cursor) -> windows::core::PCWSTR {
     match c {
         Cursor::Cross => IDC_CROSS,
+        Cursor::Arrow => IDC_ARROW,
+        Cursor::Text => IDC_IBEAM,
         Cursor::Move => IDC_SIZEALL,
         Cursor::ResizeNwse => IDC_SIZENWSE,
         Cursor::ResizeNesw => IDC_SIZENESW,
@@ -136,10 +138,14 @@ fn point(lparam: LPARAM) -> Pt {
 }
 
 fn key(vk: u16) -> Option<Key> {
+    if (0x41..=0x5A).contains(&vk) {
+        // A–Z: виртуальные коды букв от раскладки не зависят
+        return Some(Key::Letter(vk as u8 as char));
+    }
     Some(match VIRTUAL_KEY(vk) {
         VK_ESCAPE => Key::Esc,
         VK_RETURN => Key::Enter,
-        VK_C => Key::C,
+        VK_BACK => Key::Backspace,
         VK_LEFT => Key::Left,
         VK_RIGHT => Key::Right,
         VK_UP => Key::Up,
@@ -178,6 +184,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         WM_MOUSEMOVE => {
             send(Input::Move(point(lparam)));
+            LRESULT(0)
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN if wparam.0 as u16 == VK_SHIFT.0 => {
+            send(Input::Shift(true));
+            LRESULT(0)
+        }
+        WM_KEYUP | WM_SYSKEYUP if wparam.0 as u16 == VK_SHIFT.0 => {
+            send(Input::Shift(false));
+            LRESULT(0)
+        }
+        WM_CHAR => {
+            // набранный символ для подписи; управляющие (Ctrl+буква, Enter, Backspace) — не текст
+            if let Some(c) = char::from_u32(wparam.0 as u32).filter(|c| !c.is_control()) {
+                send(Input::Char(c));
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam.0 >> 16) & 0xFFFF) as i16 as i32;
+            let notches = if delta.abs() >= 120 { delta / 120 } else { delta.signum() };
+            // у колёсика координаты экранные — переводим в координаты окна
+            let mut pt = POINT { x: point(lparam).x, y: point(lparam).y };
+            let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+            if notches != 0 {
+                send(Input::Wheel(notches, Pt { x: pt.x, y: pt.y }));
+            }
             LRESULT(0)
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {

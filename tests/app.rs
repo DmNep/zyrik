@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use zyrik::app::{arg_error_text, help_text, run};
+use zyrik::export::Stamp;
 use zyrik::args::{parse, Launch, Options};
 use zyrik::hotkey::Hotkey;
 use zyrik::i18n::Lang;
@@ -28,6 +29,10 @@ struct Fake {
     cursor: Option<Cursor>,
     /// что легло в буфер: размер и пиксели
     clipboard: Option<(u32, u32, Vec<u32>)>,
+    pictures: Option<PathBuf>,
+    /// какие диалоги открывались: стартовая папка, имя
+    dialogs: Vec<(Option<PathBuf>, String)>,
+    dialog_answer: Option<PathBuf>,
 }
 
 /// Кадр 400×300 в координатах ОС (-100, 0): у каждого пикселя своё значение.
@@ -94,8 +99,15 @@ impl Platform for Fake {
         self.clipboard = Some((image.width(), image.height(), image.pixels().to_vec()));
         Ok(())
     }
-    fn save_dialog(&mut self, _: &Path, _: &str) -> Result<Option<PathBuf>, Problem> {
-        Err(Problem::NotYet("phase 4"))
+    fn save_dialog(&mut self, start: Option<&Path>, name: &str) -> Result<Option<PathBuf>, Problem> {
+        self.dialogs.push((start.map(Path::to_path_buf), name.to_string()));
+        Ok(self.dialog_answer.clone())
+    }
+    fn pictures_dir(&self) -> Option<PathBuf> {
+        self.pictures.clone()
+    }
+    fn local_time(&self) -> Stamp {
+        Stamp { year: 2026, month: 11, day: 21, hour: 9, minute: 5, second: 7 }
     }
     fn message(&self, _: &str, text: &str, error: bool) {
         self.messages.borrow_mut().push((text.into(), error));
@@ -304,4 +316,118 @@ fn help_and_errors_in_both_languages() {
             assert!(text.contains("--clear-clipboard"), "к ошибке приложена справка");
         }
     }
+}
+
+// ---------- фаза 3: пометки попадают в снимок, сохранение ----------
+
+fn ctrl(k: char) -> Command {
+    ov(Input::Key { key: Key::Letter(k), shift: false, ctrl: true })
+}
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("zyrik-app-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn select_and_draw() -> Vec<Command> {
+    vec![
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        left_up(110, 70),
+        ov(Input::Key { key: Key::Letter('R'), shift: false, ctrl: false }),
+        left_down(30, 30),
+        ov(Input::Move(Pt { x: 60, y: 50 })),
+        left_up(80, 60),
+    ]
+}
+
+#[test]
+fn marks_are_baked_into_the_clipboard_shot() {
+    let mut fake = Fake::default();
+    fake.commands.extend(select_and_draw());
+    fake.commands.push_back(key(Key::Enter));
+    let f = go(fake, &[]);
+    let (w, h, px) = f.clipboard.unwrap();
+    assert_eq!((w, h), (100, 50));
+    let plain = test_frame().image.crop(Rect { x: 10, y: 20, w: 100, h: 50 });
+    assert_ne!(px, plain.pixels(), "прямоугольник нарисован в снимке");
+    // угол прямоугольника (30,30) кадра → (20,10) снимка — красный
+    let p = px[10 * 100 + 20];
+    assert!((p >> 16) & 0xFF > 180, "{p:#x}");
+}
+
+#[test]
+fn ctrl_s_saves_png_to_pictures_without_dialog() {
+    let dir = temp_dir("ctrl-s");
+    let mut fake = Fake { pictures: Some(dir.clone()), ..Fake::default() };
+    fake.commands.extend(select_and_draw());
+    fake.commands.push_back(ctrl('S'));
+    let f = go(fake, &[]);
+    assert!(f.dialogs.is_empty(), "без диалога");
+    assert!(f.clipboard.is_none(), "Ctrl+S — только файл");
+    assert_eq!(f.overlay, None, "режим закрылся");
+    let file = dir.join("Зырик_2026-11-21_09-05-07.png");
+    let bytes = std::fs::read(&file).expect("файл сохранён");
+    assert_eq!(&bytes[..4], b"\x89PNG");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn save_dir_option_wins_over_pictures() {
+    let dir = temp_dir("save-dir");
+    let other = temp_dir("pictures");
+    let mut fake = Fake { pictures: Some(other.clone()), ..Fake::default() };
+    fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), ctrl('S')]);
+    let f = go(fake, &["--save-dir", dir.to_str().unwrap()]);
+    assert!(f.dialogs.is_empty());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(&other).unwrap().count(), 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(&other).unwrap();
+}
+
+#[test]
+fn missing_folder_opens_dialog_and_cancel_keeps_selection() {
+    let gone = std::env::temp_dir().join("zyrik-нет-такой-папки-123");
+    let mut fake = Fake { dialog_answer: None, ..Fake::default() };
+    fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), ctrl('S'), key(Key::Enter)]);
+    let f = go(fake, &["--save-dir", gone.to_str().unwrap()]);
+    assert_eq!(f.dialogs.len(), 1, "недоступная папка → диалог");
+    assert_eq!(f.dialogs[0].1, "Зырик_2026-11-21_09-05-07.png");
+    assert!(!gone.exists(), "папку сами не создали");
+    // отменил диалог — выделение осталось, Enter положил снимок в буфер
+    assert!(f.clipboard.is_some());
+}
+
+#[test]
+fn floppy_dialog_choice_becomes_last_folder() {
+    let first = temp_dir("dialog-a");
+    let chosen = temp_dir("dialog-b");
+    let mut fake = Fake {
+        pictures: Some(first.clone()),
+        dialog_answer: Some(chosen.join("мой снимок.png")),
+        ..Fake::default()
+    };
+    // щелчок по дискете на панели под выделенной зоной
+    let sel = Rect { x: 10, y: 20, w: 100, h: 50 };
+    let bar = zyrik::toolbar::layout(sel, Rect { x: 0, y: 0, w: 400, h: 300 }, &test_frame().monitors);
+    let fl = bar.button_rect(zyrik::toolbar::Button::Save).unwrap();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        left_up(110, 70),
+        left_down(fl.x + 4, fl.y + 4),
+    ]);
+    // второй снимок — Ctrl+S уже без диалога, в выбранную папку
+    fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), ctrl('S')]);
+    let f = go(fake, &[]);
+    assert_eq!(f.dialogs.len(), 1);
+    assert_eq!(f.dialogs[0].0.as_deref(), Some(first.as_path()), "диалог открылся в последней папке");
+    assert!(chosen.join("мой снимок.png").exists());
+    assert!(chosen.join("Зырик_2026-11-21_09-05-07.png").exists(), "Ctrl+S — в папку из диалога");
+    assert_eq!(std::fs::read_dir(&first).unwrap().count(), 0);
+    std::fs::remove_dir_all(&first).unwrap();
+    std::fs::remove_dir_all(&chosen).unwrap();
 }
