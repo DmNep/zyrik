@@ -34,12 +34,19 @@ pub(crate) fn seed_phrases(lines: &[Line]) -> Vec<Finding> {
     // все слова по порядку: (строка, индекс слова в строке, слово словаря или нет)
     let mut seq: Vec<(usize, usize, bool)> = Vec::new();
     for (li, l) in lines.iter().enumerate() {
-        for (wi, w) in l.words.iter().enumerate() {
-            match clean(&w.text) {
-                Some(None) => {}
-                Some(Some(t)) => seq.push((li, wi, is_word(&t))),
-                None => seq.push((li, wi, false)),
-            }
+        let line: Vec<(usize, usize, bool)> = l
+            .words
+            .iter()
+            .enumerate()
+            .filter_map(|(wi, w)| match clean(&w.text) {
+                Some(None) => None,
+                Some(Some(t)) => Some((li, wi, is_word(&t))),
+                None => Some((li, wi, false)),
+            })
+            .collect();
+        // строка без единого слова словаря (соседнее окно, колонка) фразу не рвёт
+        if line.iter().any(|x| x.2) {
+            seq.extend(line);
         }
     }
     let mut out = Vec::new();

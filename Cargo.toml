@@ -61,6 +61,11 @@ objc2-core-graphics = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-screen-capture-kit = "0.3.2"
 
+[features]
+# Встроенное распознавание текста (Tesseract + Leptonica, статически) для поиска опасного.
+# Перед сборкой: bash tools/ocr-build.sh (или ZYRIK_OCR_LIB=<папка с libtesseract*.a и libleptonica*>).
+ocr = []
+
 [profile.release]
 opt-level = "s"
 lto = true

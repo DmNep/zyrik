@@ -71,27 +71,59 @@ pub(crate) struct Line<'a> {
     pub spans: Vec<(usize, usize)>,
 }
 
+/// Строки в порядке чтения — по геометрии слов, а не по номерам строк распознавания: оно иногда
+/// склеивает соседние строки в одну (а то и с текстом соседнего окна), и слова перемешиваются.
+/// Один ряд — слова, у которых середины по высоте близки (в пределах половины высоты); внутри
+/// ряда — слева направо; разрыв больше трёх высот текста — уже другая колонка.
 pub(crate) fn lines(words: &[Word]) -> Vec<Line<'_>> {
-    let mut ids: Vec<usize> = words.iter().map(|w| w.line).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids.into_iter()
-        .map(|id| {
-            let mut ws: Vec<&Word> = words.iter().filter(|w| w.line == id).collect();
-            ws.sort_by_key(|w| w.rect.x);
-            let mut text = String::new();
-            let mut spans = Vec::new();
-            for w in &ws {
-                if !text.is_empty() {
-                    text.push(' ');
+    let center = |w: &Word| w.rect.y * 2 + w.rect.h;
+    let mut ws: Vec<&Word> = words.iter().collect();
+    ws.sort_by_key(|w| (center(w), w.rect.x));
+    // слишком высокие рамки (распознавание склеило две строки) не задают высоту ряда
+    let mut heights: Vec<i32> = ws.iter().map(|w| w.rect.h.max(1)).collect();
+    heights.sort_unstable();
+    let typical = heights.get(heights.len() / 2).copied().unwrap_or(16);
+    let mut rows: Vec<Vec<&Word>> = Vec::new();
+    for w in ws {
+        let h = w.rect.h.min(typical * 2).max(1);
+        match rows.last_mut() {
+            Some(row) if (center(w) - center(row[0])).abs() <= h => row.push(w),
+            _ => rows.push(vec![w]),
+        }
+    }
+    let mut out = Vec::new();
+    for mut row in rows {
+        row.sort_by_key(|w| w.rect.x);
+        let mut part: Vec<&Word> = Vec::new();
+        for w in row {
+            if let Some(prev) = part.last() {
+                let gap = w.rect.x - prev.rect.right();
+                let height = prev.rect.h.min(w.rect.h).clamp(1, typical * 2);
+                if gap > 3 * height {
+                    out.push(line(std::mem::take(&mut part)));
                 }
-                let start = text.chars().count();
-                text.push_str(&w.text);
-                spans.push((start, start + w.text.chars().count()));
             }
-            Line { words: ws, text, spans }
-        })
-        .collect()
+            part.push(w);
+        }
+        if !part.is_empty() {
+            out.push(line(part));
+        }
+    }
+    out
+}
+
+fn line(ws: Vec<&Word>) -> Line<'_> {
+    let mut text = String::new();
+    let mut spans = Vec::new();
+    for w in &ws {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        let start = text.chars().count();
+        text.push_str(&w.text);
+        spans.push((start, start + w.text.chars().count()));
+    }
+    Line { words: ws, text, spans }
 }
 
 impl Line<'_> {
@@ -136,6 +168,20 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 
 /// Отступ вокруг рамки, чтобы закраска накрывала буквы целиком (выносные элементы, сглаживание).
 const PAD: i32 = 2;
+
+/// Опасное по нескольким распознаваниям одного снимка (английская и русская модели): находки
+/// складываются, совпадающие по месту не дублируются — остаётся первая.
+pub fn detect_all(sets: &[Vec<Word>]) -> Vec<Finding> {
+    let mut out: Vec<Finding> = Vec::new();
+    for words in sets {
+        for f in detect(words) {
+            if !out.iter().any(|o| o.rects.iter().any(|a| f.rects.iter().any(|b| overlaps(*a, *b)))) {
+                out.push(f);
+            }
+        }
+    }
+    out
+}
 
 /// Всё опасное среди слов. Перекрывающиеся находки не дублируются: остаётся первая по
 /// порядку правил (многострочные блоки → точные шаблоны → общие).

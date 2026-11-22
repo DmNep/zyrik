@@ -156,7 +156,8 @@ fn crypto_keys_and_wallets() {
     one("send to 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", Category::Wallet);
     one("btc: bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", Category::Wallet);
     one("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", Category::Wallet);
-    assert!(!cats("0x5AAeb6053F3E94C9b9A09f33669435E7Ef1BeAed").contains(&Category::Wallet), "испорченная EIP-55");
+    // EIP-55 не требуется: распознавание текста путает регистр букв, а пропустить адрес хуже
+    one("0x5AAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", Category::Wallet);
 }
 
 // ---------- инфраструктура ----------
@@ -196,4 +197,32 @@ fn ordinary_code_and_docs_are_clean() {
         assert!(f.len() <= 1, "SC-008: больше одного ложного срабатывания в {s:?}: {f:?}");
         assert!(f.is_empty(), "ложное срабатывание в {s:?}: {f:?}");
     }
+}
+
+#[test]
+fn far_apart_words_on_one_row_are_separate_lines() {
+    // распознавание склеило сид-фразу с текстом соседнего окна далеко справа
+    let mut ws = words("1. abandon 2. ability 3. able 4. about 5. above 6. absent
+7. absorb 8. abstract 9. absurd 10. abuse 11. access 12. accident");
+    for (i, extra) in ["ieee", "pulses/min"].iter().enumerate() {
+        ws.push(Word { text: extra.to_string(), rect: Rect { x: 1500, y: i as i32 * LH, w: 40, h: 16 }, line: i });
+    }
+    let f = detect(&ws);
+    assert!(f.iter().any(|f| f.category == Category::SeedPhrase), "{f:?}");
+}
+
+#[test]
+fn rows_come_from_geometry_not_from_recognizer_line_ids() {
+    // распознавание выдало обе строки фразы как одну (line = 0) и ещё слово соседнего окна
+    let mut ws = words("1. abandon 2. ability 3. able 4. about 5. above 6. absent
+7. absorb 8. abstract 9. absurd 10. abuse 11. access 12. accident
+fn main() { }");
+    for w in ws.iter_mut().filter(|w| w.rect.y < 2 * LH) {
+        w.line = 0;
+    }
+    ws.push(Word { text: "oeescn".into(), rect: Rect { x: 1500, y: 4, w: 60, h: 30 }, line: 0 });
+    let f = detect(&ws);
+    let seed: Vec<&Finding> = f.iter().filter(|f| f.category == Category::SeedPhrase).collect();
+    assert_eq!(seed.len(), 1, "{f:?}");
+    assert_eq!(seed[0].rects.len(), 2, "две строки фразы");
 }

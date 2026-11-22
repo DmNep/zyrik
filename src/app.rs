@@ -361,8 +361,8 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot, detect: bool) -> Option
         let copy = Image::from_pixels(w, h, frame.image.pixels().to_vec());
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let words = crate::ocr::recognize(&copy);
-            let _ = tx.send(crate::redact::detect(&words));
+            let sets = crate::ocr::recognize(&copy);
+            let _ = tx.send(crate::redact::detect_all(&sets));
         });
         session.start_detect();
         p.schedule(Command::Tick, TICK_MS);

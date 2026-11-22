@@ -1,6 +1,7 @@
 //! 1. Языковые таблицы `locales/*.toml` → `enum Msg` и массивы строк (D6).
 //!    Пропущенный ключ или несовпадающие подстановки — ошибка сборки.
 //! 2. Windows: значок и сведения о версии в exe (как в Зябре).
+//! 3. Фича `ocr`: статические Tesseract и Leptonica (собраны `tools/ocr-build.sh`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -12,6 +13,47 @@ fn main() {
     locales(&out);
     println!("cargo:rerun-if-changed=assets/zyrik.ico");
     embed_resources(&out);
+    if std::env::var_os("CARGO_FEATURE_OCR").is_some() {
+        link_ocr(&out);
+    }
+}
+
+// ---------- распознавание текста ----------
+
+fn link_ocr(out: &Path) {
+    println!("cargo:rerun-if-env-changed=ZYRIK_OCR_LIB");
+    let dir = std::env::var_os("ZYRIK_OCR_LIB").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("target/ocr/install/lib"));
+    let entries = std::fs::read_dir(&dir).unwrap_or_else(|_| {
+        panic!("фича ocr: нет {} — сначала соберите Tesseract: bash tools/ocr-build.sh", dir.display())
+    });
+    let (mut tess, mut lept) = (false, false);
+    for e in entries.flatten() {
+        let n = e.file_name().to_string_lossy().to_string();
+        // Leptonica под Windows кладёт статический архив с суффиксом .dll — даём обычное имя
+        if n.starts_with("libleptonica") && (n.ends_with(".a") || n.ends_with(".dll")) {
+            std::fs::copy(e.path(), out.join("libleptonica.a")).expect("libleptonica");
+            lept = true;
+        }
+        if n.starts_with("libtesseract") && n.ends_with(".a") {
+            std::fs::copy(e.path(), out.join("libtesseract.a")).expect("libtesseract");
+            tess = true;
+        }
+    }
+    assert!(tess && lept, "фича ocr: в {} нет libtesseract*.a или libleptonica*", dir.display());
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=tesseract");
+    println!("cargo:rustc-link-lib=static=leptonica");
+    let target = std::env::var("TARGET").unwrap_or_default();
+    if target.contains("windows-gnu") {
+        // C++-рантайм MinGW — внутрь exe: рядом никаких libstdc++-6.dll
+        for a in ["-Wl,-Bstatic", "-lstdc++", "-lwinpthread", "-lmingwex", "-lgcc_eh", "-lgcc", "-Wl,-Bdynamic", "-lmsvcrt", "-lkernel32"] {
+            println!("cargo:rustc-link-arg={a}");
+        }
+    } else if target.contains("apple") {
+        println!("cargo:rustc-link-lib=c++");
+    } else {
+        println!("cargo:rustc-link-lib=stdc++");
+    }
 }
 
 // ---------- языки ----------

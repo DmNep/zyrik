@@ -1,0 +1,11 @@
+[package]
+name = "ocr-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# R4/R5/R7: статический Tesseract + Leptonica, модель из памяти, качество и скорость.
+[dependencies]
+zyrik = { path = "../.." }
+
+[workspace]

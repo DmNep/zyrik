@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::validators::{base58check, bech32, eip55, entropy, inn, luhn, snils};
+use super::validators::{base58check, bech32, entropy, inn, luhn, snils};
 use super::{Category, Finding, Line};
 
 struct Rule {
@@ -57,7 +57,8 @@ fn rules() -> &'static [Rule] {
             rule(CryptoKey, r"\b[xyzt]prv[1-9A-HJ-NP-Za-km-z]{100,112}\b", 0, Some(base58check)),
             rule(CryptoKey, r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b", 0, Some(base58check)),
             rule(CryptoKey, r"\b(?:0x)?[0-9a-fA-F]{64}\b", 0, None),
-            rule(Wallet, r"\b0[xX][0-9a-fA-F]{40}\b", 0, Some(eip55)),
+            // контрольную сумму EIP-55 не требуем: распознавание путает регистр, а пропуск хуже
+            rule(Wallet, r"\b0[xX][0-9a-fA-F]{40}\b", 0, None),
             rule(Wallet, r"\b(?:bc|tb|ltc)1[02-9ac-hj-np-zAC-HJ-NP-Z]{8,87}\b", 0, Some(bech32)),
             rule(Wallet, r"\b[13][1-9A-HJ-NP-Za-km-z]{25,34}\b", 0, Some(wallet_base58)),
             // --- личное
