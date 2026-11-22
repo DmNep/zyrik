@@ -28,6 +28,8 @@ pub struct Options {
 pub enum Launch {
     Run(Options),
     Help,
+    /// `--trigger`: попросить уже запущенный Зырик зырнуть (Linux; бинд в конфиге Sway/Hyprland)
+    Trigger,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +53,7 @@ const SAVE_DIR: &str = "--save-dir";
 const CLEAR: &str = "--clear-clipboard";
 const NO_DETECT: &str = "--no-detect";
 const LANG: &str = "--lang";
+const TRIGGER: &str = "--trigger";
 
 const WITH_VALUE: [&str; 6] = [KEY, KEY_SCREEN, KEY_WINDOW, SAVE_DIR, CLEAR, LANG];
 
@@ -75,9 +78,17 @@ where
     let mut clear_clipboard = None;
     let mut no_detect = false;
     let mut lang = None;
+    let mut trigger = false;
 
     let mut it = args.iter();
     while let Some(arg) = it.next() {
+        if arg == TRIGGER {
+            if trigger {
+                return Err(ArgError::Duplicate(TRIGGER));
+            }
+            trigger = true;
+            continue;
+        }
         if arg == NO_DETECT {
             if no_detect {
                 return Err(ArgError::Duplicate(NO_DETECT));
@@ -141,6 +152,9 @@ where
         }
     }
 
+    if trigger {
+        return Ok(Launch::Trigger);
+    }
     let key = key.unwrap_or_else(Hotkey::default_capture);
     let named = [(KEY, Some(key)), (KEY_SCREEN, key_screen), (KEY_WINDOW, key_window)];
     for (i, (a, ka)) in named.iter().enumerate() {

@@ -34,6 +34,7 @@ fn main() {
         let title = lang.tr(Msg::AppName);
         match args::parse(&raw) {
             Ok(Launch::Help) => win::explain(title, &app::help_text(lang), false),
+            Ok(Launch::Trigger) => win::explain(title, lang.tr(Msg::TriggerUnsupported), true),
             Ok(Launch::Run(opts)) => app::run(&mut platform, &opts, lang),
             Err(e) => {
                 win::explain(title, &app::arg_error_text(&e, lang), true);
@@ -51,7 +52,27 @@ fn main() {
         let title = lang.tr(Msg::AppName);
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
+            Ok(Launch::Trigger) => {
+                if let Err(e) = linux::trigger() {
+                    eprintln!("{}", lang.tr(Msg::TriggerNotRunning));
+                    eprintln!("({e})");
+                    std::process::exit(1);
+                }
+            }
             Ok(Launch::Run(opts)) => {
+                // Wayland, если он есть и композитор умеет нужное; иначе X11 (в том числе XWayland)
+                let wayland = std::env::var_os("ZYRIK_X11").is_none().then(linux::Wayland::new);
+                match wayland {
+                    Some(Ok(mut platform)) => {
+                        let lang = i18n::choose(hint.as_deref(), platform.system_lang().as_deref());
+                        app::run(&mut platform, &opts, lang);
+                        return;
+                    }
+                    Some(Err(e)) if std::env::var_os("WAYLAND_DISPLAY").is_some() => {
+                        eprintln!("zyrik: Wayland: {e}; пробую X11");
+                    }
+                    _ => {}
+                }
                 let mut platform = match linux::Linux::new() {
                     Ok(p) => p,
                     Err(e) => {
@@ -77,6 +98,10 @@ fn main() {
         let lang = i18n::choose(hint.as_deref(), env_lang.as_deref());
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
+            Ok(Launch::Trigger) => {
+                eprintln!("{}", lang.tr(Msg::TriggerUnsupported));
+                std::process::exit(2);
+            }
             Ok(Launch::Run(opts)) => {
                 let mut platform = match mac::Mac::new() {
                     Ok(p) => p,
@@ -106,7 +131,7 @@ fn main() {
         let lang = i18n::choose(args::lang_hint(&raw).as_deref(), system.as_deref());
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
-            Ok(Launch::Run(_)) => {
+            Ok(Launch::Trigger) | Ok(Launch::Run(_)) => {
                 eprintln!("{}", lang.tr(Msg::ErrPlatform));
                 std::process::exit(1);
             }

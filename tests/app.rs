@@ -113,7 +113,7 @@ impl Platform for Fake {
 fn opts(args: &[&str]) -> Options {
     match parse(args.iter().copied()).unwrap() {
         Launch::Run(o) => o,
-        Launch::Help => unreachable!(),
+        Launch::Help | Launch::Trigger => unreachable!(),
     }
 }
 
@@ -298,7 +298,7 @@ fn help_and_errors_in_both_languages() {
     for code in ["ru", "en"] {
         let lang = Lang::from_code(code).unwrap();
         let help = help_text(lang);
-        for opt in ["--key", "--key-screen", "--key-window", "--save-dir", "--clear-clipboard", "--no-detect", "--lang", "--help"] {
+        for opt in ["--key", "--key-screen", "--key-window", "--save-dir", "--clear-clipboard", "--no-detect", "--lang", "--trigger", "--help"] {
             assert!(help.contains(opt), "{code}: {opt}");
         }
         assert!(!help.contains('{'), "{code}: неподставленное в справке");

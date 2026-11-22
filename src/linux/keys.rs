@@ -52,19 +52,7 @@ impl Keymap {
     /// Клавиша режима выделения. Буквы — по первой раскладке (обычно латинской), как виртуальные
     /// коды в Windows: P/L/A/R/T работают и при русской раскладке.
     pub fn key(&self, code: u8) -> Option<Key> {
-        let sym = self.sym(code, 0);
-        Some(match sym {
-            0xff1b => Key::Esc,
-            0xff0d | 0xff8d => Key::Enter,
-            0xff08 => Key::Backspace,
-            0xff51 | 0xff96 => Key::Left,
-            0xff52 | 0xff97 => Key::Up,
-            0xff53 | 0xff98 => Key::Right,
-            0xff54 | 0xff99 => Key::Down,
-            0x61..=0x7a => Key::Letter((sym as u8 - 0x20) as char),
-            0x41..=0x5a => Key::Letter(sym as u8 as char),
-            _ => return None,
-        })
+        key_from_sym(self.sym(code, 0))
     }
 
     /// Набранный символ с учётом раскладки (группа из `state`) и Shift/CapsLock.
@@ -94,6 +82,22 @@ impl Keymap {
             self.codes(sym).iter().any(|&c| keys[(c / 8) as usize] & (1 << (c % 8)) != 0)
         })
     }
+}
+
+/// Клавиша режима выделения по keysym первой раскладки (буквы — латинские при любой раскладке).
+pub fn key_from_sym(sym: u32) -> Option<Key> {
+    Some(match sym {
+        0xff1b => Key::Esc,
+        0xff0d | 0xff8d => Key::Enter,
+        0xff08 => Key::Backspace,
+        0xff51 | 0xff96 => Key::Left,
+        0xff52 | 0xff97 => Key::Up,
+        0xff53 | 0xff98 => Key::Right,
+        0xff54 | 0xff99 => Key::Down,
+        0x61..=0x7a => Key::Letter((sym as u8 - 0x20) as char),
+        0x41..=0x5a => Key::Letter(sym as u8 as char),
+        _ => return None,
+    })
 }
 
 /// keysym клавиши горячей комбинации.

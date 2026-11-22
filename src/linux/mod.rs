@@ -8,10 +8,13 @@
 
 mod clipboard;
 mod conn;
-mod keys;
-mod tray;
+pub(crate) mod instance;
+pub(crate) mod keys;
+pub(crate) mod tray;
+mod wayland;
 
-use std::os::unix::net::UnixListener;
+pub use wayland::Wayland;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -78,7 +81,6 @@ pub struct Linux {
     rx: Receiver<Event>,
     timers: Vec<(Instant, Command)>,
     tray: Option<ksni::blocking::Handle<tray::ZTray>>,
-    guard: Option<UnixListener>,
     cursors: [u32; 8],
     cursor: Option<Cursor>,
     size: (u16, u16),
@@ -188,7 +190,6 @@ impl Linux {
             rx,
             timers: Vec::new(),
             tray: None,
-            guard: None,
             cursors,
             cursor: None,
             size: (s.width_in_pixels, s.height_in_pixels),
@@ -330,7 +331,7 @@ fn monitors(x: &X, w: u16, h: u16) -> Vec<Monitor> {
 }
 
 /// XDG-папки пользователя (`~/.config/user-dirs.dirs`), домашняя, корень и подключённые диски.
-fn places() -> Vec<Place> {
+pub(crate) fn places() -> Vec<Place> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut out = Vec::new();
     let config = std::env::var_os("XDG_CONFIG_HOME")
@@ -375,23 +376,11 @@ fn places() -> Vec<Place> {
 
 impl Platform for Linux {
     fn system_lang(&self) -> Option<String> {
-        ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        env_lang()
     }
 
     fn claim_single_instance(&mut self) -> Result<(), Problem> {
-        use std::os::linux::net::SocketAddrExt;
-        use std::os::unix::net::SocketAddr;
-        // абстрактный сокет: живёт, пока жив процесс, файла на диске нет
-        let uid = unsafe { libc::getuid() };
-        let addr = SocketAddr::from_abstract_name(format!("zyrik-{uid}").as_bytes()).map_err(os)?;
-        match UnixListener::bind_addr(&addr) {
-            Ok(l) => {
-                self.guard = Some(l);
-                Ok(())
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Err(Problem::AlreadyRunning),
-            Err(e) => Err(os(e)),
-        }
+        instance::claim(self.tx.clone())
     }
 
     fn show_tray(&mut self, tip: &str, menu: &[MenuItem]) -> Result<(), Problem> {
@@ -583,19 +572,7 @@ impl Platform for Linux {
     }
 
     fn local_time(&self) -> Stamp {
-        unsafe {
-            let t = libc::time(std::ptr::null_mut());
-            let mut tm: libc::tm = std::mem::zeroed();
-            libc::localtime_r(&t, &mut tm);
-            Stamp {
-                year: (tm.tm_year + 1900) as u16,
-                month: (tm.tm_mon + 1) as u8,
-                day: tm.tm_mday as u8,
-                hour: tm.tm_hour as u8,
-                minute: tm.tm_min as u8,
-                second: tm.tm_sec as u8,
-            }
-        }
+        local_time()
     }
 
     fn message(&self, title: &str, text: &str, error: bool) {
@@ -646,4 +623,28 @@ pub fn message(title: &str, text: &str, error: bool) -> std::sync::mpsc::Receive
         let _ = done.send(());
     });
     rx
+}
+
+pub use instance::trigger;
+
+/// Местные дата и время (libc `localtime_r`: часовой пояс из системы).
+pub(crate) fn local_time() -> Stamp {
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        Stamp {
+            year: (tm.tm_year + 1900) as u16,
+            month: (tm.tm_mon + 1) as u8,
+            day: tm.tm_mday as u8,
+            hour: tm.tm_hour as u8,
+            minute: tm.tm_min as u8,
+            second: tm.tm_sec as u8,
+        }
+    }
+}
+
+/// Язык из окружения: LC_ALL → LC_MESSAGES → LANG.
+pub(crate) fn env_lang() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
 }

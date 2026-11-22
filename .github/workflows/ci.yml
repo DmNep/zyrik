@@ -49,6 +49,18 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool xclip strace x11-utils x11-xkb-utils
       - run: SRC=$GITHUB_WORKSPACE bash tools/linux-test/run.sh
 
+  wayland-sway:
+    # фаза 5: Sway без экрана — захват wlr-screencopy, окно layer-shell, буфер data-control, --trigger
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y sway wtype wl-clipboard grim strace dbus-x11
+      - run: cargo build --release --locked --bin zyrik --example wl_mouse
+      - run: mkdir -p bin && cp target/release/zyrik target/release/examples/wl_mouse bin/
+      - run: sudo mkdir -p /out && sudo chmod 777 /out
+      - run: ZYRIK_BIN=$PWD/bin XDG_RUNTIME_DIR=$(mktemp -d) bash tools/wayland-test/run.sh sway
+
   macos-app:
     # D7: Зырик.app в zip; дымовая проверка на macOS (Apple Silicon)
     runs-on: macos-latest
