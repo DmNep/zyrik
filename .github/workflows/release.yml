@@ -1,0 +1,63 @@
+name: release
+
+# Тег vX.Y.Z → релиз с тремя файлами под именами из README:
+# zyrik-X.Y.Z.exe, zyrik-X.Y.Z-linux-x86_64, zyrik-X.Y.Z-macos-aarch64.zip
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - run: cargo test --locked --target x86_64-pc-windows-gnu
+      - run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - shell: bash
+        run: cp target/x86_64-pc-windows-gnu/release/zyrik.exe "zyrik-${GITHUB_REF_NAME#v}.exe"
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: "zyrik-*.exe" }
+
+  linux:
+    runs-on: ubuntu-22.04 # старее glibc — файл подойдёт большему числу дистрибутивов
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - run: cp target/release/zyrik "zyrik-${GITHUB_REF_NAME#v}-linux-x86_64"
+      - uses: actions/upload-artifact@v4
+        with: { name: linux, path: "zyrik-*-linux-x86_64" }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+      - run: bash tools/macos/bundle.sh
+      - run: cp target/macos/Zyrik-macos.zip "zyrik-${GITHUB_REF_NAME#v}-macos-aarch64.zip"
+      - uses: actions/upload-artifact@v4
+        with: { name: macos, path: "zyrik-*-macos-aarch64.zip" }
+
+  publish:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version in tag matches Cargo.toml
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "тег $GITHUB_REF_NAME, а в Cargo.toml $v"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: ls -la dist && (cd dist && sha256sum * > SHA256SUMS.txt)
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Зырик ${GITHUB_REF_NAME#v}" --notes-file <(sed -n '1,/^## Что программа не делает/p' README.md | head -n -1)
