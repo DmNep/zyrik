@@ -35,7 +35,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGPoint, CGRect, CGSize, CFRetained};
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImage,
-    CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess,
+    CGEventFlags, CGEventSource, CGEventSourceStateID, CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess,
 };
 use objc2_foundation::{
     NSArray, NSBundle, NSData, NSDate, NSDefaultRunLoopMode, NSError, NSLocale, NSNumber, NSObject,
@@ -88,6 +88,11 @@ struct Clip {
     watching: bool,
     /// changeCount буфера, когда в нём наш снимок
     count: isize,
+    /// После отказа нужно заново положить обещание
+    rearm: bool,
+    rearms: u32,
+    /// Пишем новое обещание: сообщения о старом не должны затереть снимок
+    writing: bool,
 }
 
 thread_local! {
@@ -274,8 +279,11 @@ define_class!(
         }
 
         #[unsafe(method(pasteboardFinishedWithDataProvider:))]
-        fn finished(&self, _pb: &NSPasteboard) {
-            wipe_clip();
+        fn finished(&self, pb: &NSPasteboard) {
+            // наше же новое обещание (после отказа) — не повод затирать снимок
+            if !with(|s| s.clip.writing) && pb.changeCount() != with(|s| s.clip.count) {
+                wipe_clip();
+            }
         }
     }
 );
@@ -364,9 +372,42 @@ fn wipe_clip() {
     });
 }
 
+/// Cmd или Ctrl зажат — по общему состоянию клавиатуры сеанса (`NSEvent.modifierFlags`
+/// у программы без активного окна отпускание не замечал).
 fn modifier_held() -> bool {
-    let f = NSEvent::modifierFlags_class();
-    f.contains(NSEventModifierFlags::Command) || f.contains(NSEventModifierFlags::Control)
+    let f = CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState);
+    f.contains(CGEventFlags::MaskCommand) || f.contains(CGEventFlags::MaskControl)
+}
+
+/// Сколько раз на один снимок заново кладём обещание после отказа фоновому читателю
+const MAX_REARMS: u32 = 20;
+
+/// Положить в буфер обещание PNG (данные — по запросу, см. `provide`) с пометками
+/// nspasteboard.org «не в историю» и «секретно». Возвращает changeCount буфера.
+fn promise(target: &ZTarget) -> Result<isize, Problem> {
+    with(|s| s.clip.writing = true);
+    let r = write_promise(target);
+    with(|s| s.clip.writing = false);
+    r
+}
+
+fn write_promise(target: &ZTarget) -> Result<isize, Problem> {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    let item = NSPasteboardItem::new();
+    let png = unsafe { NSPasteboardTypePNG };
+    let types = NSArray::from_slice(&[png]);
+    if !item.setDataProvider_forTypes(ProtocolObject::from_ref(target), &types) {
+        return Err(Problem::Os("NSPasteboardItem: setDataProvider".into()));
+    }
+    let empty = NSData::new();
+    item.setData_forType(&empty, &ns("org.nspasteboard.TransientType"));
+    item.setData_forType(&empty, &ns("org.nspasteboard.ConcealedType"));
+    let objs = NSArray::from_retained_slice(&[ProtocolObject::from_retained(item)]);
+    if !pb.writeObjects(&objs) {
+        return Err(Problem::Os("NSPasteboard: writeObjects".into()));
+    }
+    Ok(pb.changeCount())
 }
 
 /// Программа просит PNG. Что она «на переднем плане», macOS не сообщает — отдаём только
@@ -382,7 +423,14 @@ fn provide(item: &NSPasteboardItem, ty: &NSString) {
         let answer = s.clip.oneshot.requested(false, held);
         eprintln!("zyrik: буфер: просят PNG, Cmd/Ctrl {}, ответ {answer:?}", if held { "зажат" } else { "не зажат" });
         match answer {
-            Answer::Refuse => None,
+            Answer::Refuse => {
+                // macOS после отказа больше не спрашивает у нас данные этого обещания —
+                // кладём новое, иначе настоящая вставка получила бы пустоту
+                if s.clip.rearms < MAX_REARMS {
+                    s.clip.rearm = true;
+                }
+                None
+            }
             a => {
                 if a == Answer::GiveAndWatch {
                     s.clip.watching = true;
@@ -404,9 +452,11 @@ fn watch_clip() {
         return;
     }
     let pb = NSPasteboard::generalPasteboard();
-    if pb.changeCount() == count {
+    let ours = pb.changeCount() == count;
+    if ours {
         pb.clearContents();
     }
+    eprintln!("zyrik: буфер: Cmd отпущен — {}", if ours { "очищен" } else { "там уже не наш снимок" });
     wipe_clip();
 }
 
@@ -630,6 +680,15 @@ impl Platform for Mac {
 
     fn next_command(&mut self) -> Option<Command> {
         loop {
+            if with(|s| std::mem::take(&mut s.clip.rearm)) {
+                match promise(&self.target) {
+                    Ok(count) => with(|s| {
+                        s.clip.count = count;
+                        s.clip.rearms += 1;
+                    }),
+                    Err(e) => eprintln!("zyrik: буфер: {e:?}"),
+                }
+            }
             watch_clip();
             if let Some(c) = with(|s| s.queue.pop_front()) {
                 return Some(c);
@@ -766,29 +825,23 @@ impl Platform for Mac {
 
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem> {
         wipe_clip();
-        let pb = NSPasteboard::generalPasteboard();
-        pb.clearContents();
-        let item = NSPasteboardItem::new();
-        let png = unsafe { NSPasteboardTypePNG };
-        let types = NSArray::from_slice(&[png]);
-        if !item.setDataProvider_forTypes(ProtocolObject::from_ref(&*self.target), &types) {
-            return Err(Problem::Os("NSPasteboardItem: setDataProvider".into()));
-        }
-        // соглашение nspasteboard.org: не сохранять в историю, содержимое секретное
-        let empty = NSData::new();
-        item.setData_forType(&empty, &ns("org.nspasteboard.TransientType"));
-        item.setData_forType(&empty, &ns("org.nspasteboard.ConcealedType"));
-        let objs = NSArray::from_retained_slice(&[ProtocolObject::from_retained(item)]);
-        if !pb.writeObjects(&objs) {
-            return Err(Problem::Os("NSPasteboard: writeObjects".into()));
-        }
-        let count = pb.changeCount();
+        // сначала снимок, потом обещание; пока пишем, «finished» старого обещания не затрёт новое
         with(|s| {
             s.clip.image = Some(image);
             s.clip.oneshot = OneShot::new();
-            s.clip.count = count;
+            s.clip.rearm = false;
+            s.clip.rearms = 0;
         });
-        Ok(())
+        match promise(&self.target) {
+            Ok(count) => {
+                with(|s| s.clip.count = count);
+                Ok(())
+            }
+            Err(e) => {
+                wipe_clip();
+                Err(e)
+            }
+        }
     }
 
     fn places(&self) -> Vec<Place> {
