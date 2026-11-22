@@ -14,11 +14,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
-      - run: cargo test --locked --target x86_64-pc-windows-gnu
-      - run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - shell: bash
+        run: CC=gcc CXX=g++ bash tools/ocr-build.sh
+      - shell: bash
+        run: |
+          export ZYRIK_OCR_LIB=$PWD/target/ocr/install/lib
+          cargo test --locked --features ocr --target x86_64-pc-windows-gnu
+          cargo build --release --locked --features ocr --target x86_64-pc-windows-gnu
       - shell: bash
         run: cp target/x86_64-pc-windows-gnu/release/zyrik.exe "zyrik-${GITHUB_REF_NAME#v}.exe"
       - uses: actions/upload-artifact@v4
@@ -28,9 +35,15 @@ jobs:
     runs-on: ubuntu-22.04 # старее glibc — файл подойдёт большему числу дистрибутивов
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked
-      - run: cargo build --release --locked
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: bash tools/ocr-build.sh
+      - run: |
+          export ZYRIK_OCR_LIB=$PWD/target/ocr/install/lib
+          cargo test --locked --features ocr
+          cargo build --release --locked --features ocr
       - run: cp target/release/zyrik "zyrik-${GITHUB_REF_NAME#v}-linux-x86_64"
       - uses: actions/upload-artifact@v4
         with: { name: linux, path: "zyrik-*-linux-x86_64" }
@@ -39,9 +52,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked
-      - run: bash tools/macos/bundle.sh
+      - run: brew install ninja && bash tools/ocr-build.sh
+      - run: |
+          export ZYRIK_OCR_LIB=$PWD/target/ocr/install/lib
+          cargo test --locked --features ocr
+          ZYRIK_FEATURES=ocr bash tools/macos/bundle.sh
       - run: cp target/macos/Zyrik-macos.zip "zyrik-${GITHUB_REF_NAME#v}-macos-aarch64.zip"
       - uses: actions/upload-artifact@v4
         with: { name: macos, path: "zyrik-*-macos-aarch64.zip" }
@@ -51,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Version in tag matches Cargo.toml
         run: |
           v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)

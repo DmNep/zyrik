@@ -3,7 +3,7 @@
 #   bash tools/macos/bundle.sh            → target/macos/Зырик.app и target/macos/Zyrik-macos.zip
 set -euo pipefail
 version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-cargo build --release --locked
+cargo build --release --locked ${ZYRIK_FEATURES:+--features $ZYRIK_FEATURES}
 out=target/macos
 app="$out/Зырик.app"
 rm -rf "$out" && mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

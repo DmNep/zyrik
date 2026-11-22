@@ -75,6 +75,53 @@ jobs:
           name: zyrik-macos
           path: target/macos/Zyrik-macos.zip
 
+  ocr:
+    # фаза 6: встроенный Tesseract (фича ocr) на трёх ОС; на Linux — ещё и под strace (T072)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ZYRIK_OCR_LIB: ${{ github.workspace }}/target/ocr/install/lib
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build strace
+      - if: runner.os == 'macOS'
+        run: brew install ninja
+      - id: ocrkey
+        run: echo "key=ocr-${{ matrix.target }}-$(git rev-parse --short HEAD:third_party/tesseract)-$(git rev-parse --short HEAD:third_party/leptonica)-$(git hash-object tools/ocr-build.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: target/ocr/install
+          key: ${{ steps.ocrkey.outputs.key }}
+      - name: Build Tesseract
+        run: |
+          if [ ! -d target/ocr/install/lib ]; then
+            if [ "$RUNNER_OS" = Windows ]; then export CC=gcc CXX=g++; fi
+            bash tools/ocr-build.sh
+          fi
+      - run: cargo test --locked --release --features ocr --target ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: bash tools/ocr-no-disk.sh
+      - run: cargo build --locked --release --features ocr --target ${{ matrix.target }}
+      - run: ls -la target/${{ matrix.target }}/release/zyrik*
+
   offline:
     # Принцип I: в программе нет сети. Проверяем код и дерево зависимостей.
     runs-on: ubuntu-latest
