@@ -9,6 +9,9 @@ publish = false
 [dependencies]
 fontdue = { version = "0.9", default-features = false, features = ["std"] }
 png = "0.17"
+regex = "1.13.2"
+sha2 = "0.11.1"
+sha3 = "0.12.0"
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 

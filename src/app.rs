@@ -133,7 +133,7 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
             Command::Capture(shot) => {
                 // T028: повторное нажатие при открытом выделении ничего не делает
                 if active.is_none() {
-                    active = start(p, lang, shot);
+                    active = start(p, lang, shot, opts.detect);
                 }
             }
             Command::CaptureLater(shot, ms) => {
@@ -221,6 +221,23 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                     Outcome::SaveAs(_) => a.open_picker(p, last_dir.as_deref(), None),
                 }
             }
+            Command::Tick => {
+                let Some(a) = active.as_mut() else { continue };
+                let Some(rx) = &a.ocr else { continue };
+                match rx.try_recv() {
+                    Ok(found) => {
+                        a.ocr = None;
+                        a.session.set_findings(found);
+                        a.redraw(p);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => p.schedule(Command::Tick, TICK_MS),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        a.ocr = None;
+                        a.session.set_findings(Vec::new());
+                        a.redraw(p);
+                    }
+                }
+            }
             Command::About => {
                 let text = lang.fmt(
                     Msg::AboutText,
@@ -236,7 +253,12 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
     }
 }
 
+/// Как часто проверять, готово ли распознавание
+const TICK_MS: u32 = 100;
+
 struct Active {
+    /// Находки из потока распознавания (пока он работает)
+    ocr: Option<std::sync::mpsc::Receiver<Vec<crate::redact::Finding>>>,
     shot: Shot,
     lang: Lang,
     frame: Frame,
@@ -258,7 +280,7 @@ impl Active {
 
     /// Зона с пометками — то, что уходит в буфер или файл.
     fn bake(&self, rect: crate::session::Rect) -> Image {
-        render::bake(&self.frame.image, rect, self.session.marks().items(), self.session.live().as_ref())
+        render::bake(&self.frame.image, rect, self.session.marks().items(), self.session.live().as_ref(), &self.session.redactions())
     }
 
     /// Открыть выбор папки на мониторе зоны, начиная с `start`.
@@ -315,7 +337,7 @@ fn saved<P: Platform>(p: &P, lang: Lang, path: &Path) {
 }
 
 /// Снять экран и открыть выделение. Захват — первым делом, пока на экране ничего нашего.
-fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
+fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot, detect: bool) -> Option<Active> {
     let t0 = Instant::now();
     let frame = match p.capture() {
         Ok(f) => f,
@@ -332,8 +354,21 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot) -> Option<Active> {
     let captured = t0.elapsed();
     // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
     let (w, h) = (frame.image.width(), frame.image.height());
-    let session = Session::with_monitors(w, h, frame.monitors.clone());
-    let mut a = Active { shot, lang, session, canvas: Image::new(w, h), frame, picker: None };
+    let mut session = Session::with_monitors(w, h, frame.monitors.clone());
+    // Поиск опасного: распознавание всего кадра в отдельном потоке — выделение не ждёт.
+    // Копия кадра у потока затирается при удалении (Image::drop).
+    let ocr = (detect && crate::ocr::available()).then(|| {
+        let copy = Image::from_pixels(w, h, frame.image.pixels().to_vec());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let words = crate::ocr::recognize(&copy);
+            let _ = tx.send(crate::redact::detect(&words));
+        });
+        session.start_detect();
+        p.schedule(Command::Tick, TICK_MS);
+        rx
+    });
+    let mut a = Active { ocr, shot, lang, session, canvas: Image::new(w, h), frame, picker: None };
     if let Err(e) = p.show_overlay(a.frame.x, a.frame.y, w, h) {
         p.message(lang.tr(Msg::AppName), &format!("{e:?}"), true);
         return None;

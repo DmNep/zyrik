@@ -25,6 +25,8 @@ pub enum Tool {
     Arrow,
     Rect,
     Text,
+    /// Закраска: сплошная заливка, «запекается» в пиксели (FR-010)
+    Redact,
 }
 
 impl Tool {
@@ -36,11 +38,12 @@ impl Tool {
             Tool::Arrow => 'A',
             Tool::Rect => 'R',
             Tool::Text => 'T',
+            Tool::Redact => 'B',
         }
     }
 
     pub fn from_key(c: char) -> Option<Tool> {
-        [Tool::Pen, Tool::Line, Tool::Arrow, Tool::Rect, Tool::Text]
+        [Tool::Pen, Tool::Line, Tool::Arrow, Tool::Rect, Tool::Text, Tool::Redact]
             .into_iter()
             .find(|t| t.key() == c.to_ascii_uppercase())
     }
@@ -87,7 +90,12 @@ pub enum Shape {
     /// Два противоположных угла
     Rect(P, P),
     Text { at: P, text: String, size: f32 },
+    /// Закраска: два противоположных угла, сплошная заливка поверх всего
+    Redact(P, P),
 }
+
+/// Цвет закраски: чёрный, без прозрачности — исходные пиксели заменяются целиком.
+pub const REDACT: u32 = 0xFF00_0000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mark {
@@ -103,7 +111,7 @@ impl Mark {
         let far = |a: P, b: P| (a.x - b.x).abs() >= 2.0 || (a.y - b.y).abs() >= 2.0;
         match &self.shape {
             Shape::Pen(pts) => !pts.is_empty(),
-            Shape::Line(a, b) | Shape::Arrow(a, b) | Shape::Rect(a, b) => far(*a, *b),
+            Shape::Line(a, b) | Shape::Arrow(a, b) | Shape::Rect(a, b) | Shape::Redact(a, b) => far(*a, *b),
             Shape::Text { text, .. } => !text.trim().is_empty(),
         }
     }

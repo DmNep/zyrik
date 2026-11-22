@@ -30,7 +30,7 @@ fn below_right_outside_by_default() {
     assert_eq!(bar.rect.right(), sel.right(), "выровнена по правому краю");
     assert_eq!(bar.rect.y, sel.bottom() + GAP);
     assert!(!overlaps(bar.rect, sel), "не загораживает выделенное");
-    assert_eq!(bar.buttons.len(), 11);
+    assert_eq!(bar.buttons.len(), 14);
 }
 
 #[test]
@@ -85,10 +85,13 @@ fn click_hits_buttons() {
     }
     let order: Vec<Button> = bar.buttons.iter().map(|(b, _)| *b).collect();
     assert_eq!(order[0], Button::Tool(Tool::Pen));
-    assert_eq!(order[5], Button::Color(Color::Red));
-    assert_eq!(order[10], Button::Close);
+    assert_eq!(order[5], Button::Tool(Tool::Redact));
+    assert_eq!(order[6], Button::Color(Color::Red));
+    assert_eq!(order[8], Button::Danger);
+    assert_eq!(order[9], Button::RedactAll);
+    assert_eq!(order[13], Button::Close);
     // промежуток между группами — не кнопка
-    let tools_end = bar.buttons[4].1.right();
+    let tools_end = bar.buttons[5].1.right();
     assert_eq!(bar.hit(Pt { x: tools_end + 2, y: bar.rect.y + bar.rect.h / 2 }), None);
     assert!(bar.contains(Pt { x: tools_end + 2, y: bar.rect.y + bar.rect.h / 2 }));
 }

@@ -28,6 +28,8 @@ pub enum Command {
     Overlay(Input),
     About,
     Quit,
+    /// Таймер ядра: проверить, готово ли распознавание текста
+    Tick,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

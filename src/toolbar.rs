@@ -15,6 +15,10 @@ pub enum Button {
     Undo,
     /// Дискета: «Сохранить как…»
     Save,
+    /// Показать или скрыть найденное опасное (D)
+    Danger,
+    /// Закрасить всё найденное (Shift+D)
+    RedactAll,
     /// ✓ — в буфер
     Copy,
     /// ✕ — закрыть
@@ -22,15 +26,17 @@ pub enum Button {
 }
 
 /// Кнопки по группам; между группами — промежуток.
-pub const GROUPS: [&[Button]; 4] = [
+pub const GROUPS: [&[Button]; 5] = [
     &[
         Button::Tool(Tool::Pen),
         Button::Tool(Tool::Line),
         Button::Tool(Tool::Arrow),
         Button::Tool(Tool::Rect),
         Button::Tool(Tool::Text),
+        Button::Tool(Tool::Redact),
     ],
     &[Button::Color(Color::Red), Button::Color(Color::Blue)],
+    &[Button::Danger, Button::RedactAll],
     &[Button::Undo, Button::Save],
     &[Button::Copy, Button::Close],
 ];

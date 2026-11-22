@@ -71,8 +71,8 @@ check '[ "$chunks" = "IHDR,IDAT,IEND" ]' "в PNG только IHDR,IDAT,IEND ($c
 
 # 3. дискета → выбор папки → Enter (в «Снимки») → Ctrl+S
 shot
-# панель под зоной справа: правый край 700, дискета — 9-я кнопка (см. toolbar.rs)
-bar_w=$((4*2 + 32*11 + 10*3)); fx=$((700 - bar_w + 4 + 32*8 + 10*2 + 16)); fy=$((450 + 8 + 4 + 16))
+# панель под зоной справа: правый край 700, дискета — 12-я кнопка (см. toolbar.rs)
+bar_w=$((4*2 + 32*14 + 10*4)); fx=$((700 - bar_w + 4 + 32*11 + 10*3 + 16)); fy=$((450 + 8 + 4 + 16))
 xdotool mousemove $fx $fy click 1; sleep 0.3
 check 'xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "после дискеты выделение на месте (открыт выбор папки)"
 xdotool key Return; sleep 0.2; xdotool key ctrl+s; sleep 0.5

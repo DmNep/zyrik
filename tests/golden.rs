@@ -106,7 +106,7 @@ fn baked_shot_has_marks_but_no_ui() {
     let f = frame();
     let s = scene();
     let sel = s.selection().unwrap();
-    let shot = render::bake(&f, sel, s.marks().items(), None);
+    let shot = render::bake(&f, sel, s.marks().items(), None, &[]);
     check("baked.png", &shot);
 }
 
@@ -135,4 +135,26 @@ fn folder_picker_top_level() {
     render::overlay(&f, &s, &mut out, lang);
     render::picker(&mut out, &pk, lang);
     check("picker_ru.png", &out);
+}
+
+#[test]
+fn danger_mode_findings() {
+    use zyrik::redact::{Category, Finding};
+    use zyrik::session::Rect;
+    let f = frame();
+    let mut s = Session::new(W, H);
+    s.start_detect();
+    s.set_findings(vec![
+        Finding { category: Category::Email, rects: vec![Rect { x: 160, y: 140, w: 220, h: 22 }] },
+        Finding { category: Category::SeedPhrase, rects: vec![Rect { x: 160, y: 200, w: 380, h: 22 }, Rect { x: 160, y: 226, w: 300, h: 22 }] },
+        Finding { category: Category::Token, rects: vec![Rect { x: 160, y: 290, w: 420, h: 22 }] },
+    ]);
+    drag(&mut s, (120, 80), (720, 440));
+    // почту закрасили щелчком, курсор над токеном — видна категория
+    down(&mut s, 170, 150);
+    up(&mut s, 170, 150);
+    mv(&mut s, 300, 300);
+    let mut out = Image::new(W, H);
+    render::overlay(&f, &s, &mut out, Lang::from_code("ru").unwrap());
+    check("danger_ru.png", &out);
 }

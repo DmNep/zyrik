@@ -6,7 +6,8 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke,
 use super::{text, Color, Mark, Shape, Tool, P};
 use crate::i18n::{Lang, Msg};
 use crate::image::Image;
-use crate::session::{Pt, Rect, Session};
+use crate::redact::Category;
+use crate::session::{Detect, Pt, Rect, Session};
 use crate::picker::{Entry, Hit, Picker, Status};
 use crate::platform::PlaceKind;
 use crate::toolbar::{Bar, Button};
@@ -29,10 +30,15 @@ fn dim(px: u32) -> u32 {
 }
 
 /// Снимок зоны с пометками — именно он идёт в буфер и в файл (T038).
-pub fn bake(frame: &Image, sel: Rect, marks: &[Mark], live: Option<&Mark>) -> Image {
+/// `redact` — закрашенные находки (координаты кадра): заливаются поверх всего, как и закраска
+/// вручную, — пиксели заменяются целиком (FR-010, SC-005).
+pub fn bake(frame: &Image, sel: Rect, marks: &[Mark], live: Option<&Mark>, redact: &[Rect]) -> Image {
     let mut img = frame.crop(sel);
     let all: Vec<&Mark> = marks.iter().chain(live).collect();
     draw_marks(&mut img, sel.x, sel.y, &all);
+    for r in redact {
+        fill_rect(&mut img, Rect { x: r.x - sel.x, y: r.y - sel.y, ..*r }, super::REDACT);
+    }
     img
 }
 
@@ -47,7 +53,7 @@ pub fn overlay(frame: &Image, session: &Session, out: &mut Image, lang: Lang) {
     }
     let Some(sel) = session.selection() else { return };
     let live = session.live();
-    let baked = bake(frame, sel, session.marks().items(), live.as_ref());
+    let baked = bake(frame, sel, session.marks().items(), live.as_ref(), &session.redactions());
     // внутри зоны — снимок с пометками, ярко
     let w = out.width() as usize;
     {
@@ -60,8 +66,12 @@ pub fn overlay(frame: &Image, session: &Session, out: &mut Image, lang: Lang) {
     if let Some(e) = session.editing() {
         caret(out, sel, e.at, &e.text, e.size, e.color);
     }
+    if session.danger() {
+        findings(out, session);
+    }
     border(out, sel);
     size_label(out, sel);
+    danger_label(out, sel, session, lang);
     if let Some(bar) = session.toolbar() {
         draw_bar(out, &bar, session);
         if let Some(b) = session.hover() {
@@ -71,6 +81,95 @@ pub fn overlay(frame: &Image, session: &Session, out: &mut Image, lang: Lang) {
     if let Some((p, value, is_text)) = session.preview() {
         preview(out, p, value, is_text, session.color());
     }
+    if let (true, Some(f)) = (session.danger(), session.hover_finding()) {
+        let b = f.bounds();
+        hint(out, b.x, b.bottom() + 4, category_name(f.category, lang));
+    }
+}
+
+// ---------- опасное ----------
+
+const FOUND: u32 = 0xFFFF_9F1A;
+const FOUND_FILL: u32 = 0x40FF_9F1A;
+const FOUND_HOVER: u32 = 0x80FF_9F1A;
+
+/// Незакрашенные находки — оранжевая рамка и полупрозрачная заливка (закрашенные уже чёрные).
+fn findings(img: &mut Image, s: &Session) {
+    let hover = s.hover_finding().cloned();
+    for (_, f, redacted) in s.findings() {
+        if redacted {
+            continue;
+        }
+        let fill_c = if hover.as_ref() == Some(f) { FOUND_HOVER } else { FOUND_FILL };
+        for r in &f.rects {
+            fill(img, r.x, r.y, r.w, r.h, fill_c);
+            fill(img, r.x, r.y, r.w, 2, FOUND);
+            fill(img, r.x, r.bottom() - 2, r.w, 2, FOUND);
+            fill(img, r.x, r.y, 2, r.h, FOUND);
+            fill(img, r.right() - 2, r.y, 2, r.h, FOUND);
+        }
+    }
+}
+
+/// «опасное: 3 — щелчок закрашивает» / «ищу опасное…» — над правым верхним углом зоны.
+fn danger_label(img: &mut Image, sel: Rect, s: &Session, lang: Lang) {
+    let n = s.findings().filter(|(_, _, r)| !r).count();
+    let text = match (s.detect(), s.danger()) {
+        (Detect::Searching, _) => lang.tr(Msg::DangerSearching).to_string(),
+        (Detect::Done, true) if n > 0 => lang.fmt(Msg::DangerFound, &[("n", &n.to_string())]),
+        (Detect::Done, true) if s.findings().count() == 0 => lang.tr(Msg::DangerNone).to_string(),
+        (Detect::Off, true) => lang.tr(Msg::DangerUnavailable).to_string(),
+        _ => return,
+    };
+    let size = 14.0;
+    let (tw, th, _) = text::measure(&text, size);
+    let (w, h) = (tw + 12, th + 6);
+    let gap = BORDER + 4;
+    let y = if sel.y - gap - h >= 0 { sel.y - gap - h } else { sel.y + gap };
+    let x = (sel.right() - w).clamp(0, (img.width() as i32 - w).max(0));
+    hint_at(img, x, y, &text, w, h);
+}
+
+fn hint(img: &mut Image, x: i32, y: i32, text: &str) {
+    let (tw, th, _) = text::measure(text, 14.0);
+    hint_at(img, x, y, text, tw + 12, th + 6);
+}
+
+fn hint_at(img: &mut Image, x: i32, y: i32, text: &str, w: i32, h: i32) {
+    let (iw, ih) = (img.width() as i32, img.height() as i32);
+    let x = x.clamp(0, (iw - w).max(0));
+    let y = y.clamp(0, (ih - h).max(0));
+    fill(img, x, y, w, h, LABEL_BG);
+    let full = Rect { x: 0, y: 0, w: iw, h: ih };
+    text::draw(img, x + 6, y + 3, text, 14.0, WHITE, full);
+}
+
+pub fn category_name(c: Category, lang: Lang) -> &'static str {
+    use Category::*;
+    lang.tr(match c {
+        Name => Msg::CatName,
+        Email => Msg::CatEmail,
+        Phone => Msg::CatPhone,
+        Card => Msg::CatCard,
+        BankAccount => Msg::CatBankAccount,
+        Passport => Msg::CatPassport,
+        Snils => Msg::CatSnils,
+        Inn => Msg::CatInn,
+        PrivateKey => Msg::CatPrivateKey,
+        SshKey => Msg::CatSshKey,
+        Token => Msg::CatToken,
+        Password => Msg::CatPassword,
+        UrlCredentials => Msg::CatUrlCredentials,
+        ConnectionString => Msg::CatConnectionString,
+        RandomSecret => Msg::CatRandomSecret,
+        SeedPhrase => Msg::CatSeedPhrase,
+        CryptoKey => Msg::CatCryptoKey,
+        Wallet => Msg::CatWallet,
+        Ip => Msg::CatIp,
+        Mac => Msg::CatMac,
+        Host => Msg::CatHost,
+        UserPath => Msg::CatUserPath,
+    })
 }
 
 // ---------- пометки ----------
@@ -141,6 +240,14 @@ fn draw_marks(img: &mut Image, ox: i32, oy: i32, marks: &[&Mark]) {
             text::draw(img, x, y, s, *size, m.color.argb(), full);
         }
     }
+    // закраска — последней, поверх всего, без сглаживания: исходные пиксели не просвечивают
+    for m in marks {
+        if let Shape::Redact(a, b) = &m.shape {
+            let (l, r) = (a.x.min(b.x).floor() as i32, a.x.max(b.x).ceil() as i32);
+            let (t, btm) = (a.y.min(b.y).floor() as i32, a.y.max(b.y).ceil() as i32);
+            fill_rect(img, Rect { x: l - ox, y: t - oy, w: r - l, h: btm - t }, super::REDACT);
+        }
+    }
 }
 
 fn shape(pm: &mut Pixmap, m: &Mark, t: Transform) {
@@ -178,7 +285,7 @@ fn shape(pm: &mut Pixmap, m: &Mark, t: Transform) {
             pb.line_to(l, bot);
             pb.close();
         }
-        Shape::Text { .. } => return,
+        Shape::Text { .. } | Shape::Redact(..) => return,
     }
     if let Some(path) = pb.finish() {
         pm.stroke_path(&path, &pnt, &st, t, None);
@@ -364,6 +471,7 @@ fn draw_bar(img: &mut Image, bar: &Bar, s: &Session) {
         for (b, r) in &bar.buttons {
             let active = match b {
                 Button::Tool(tool) => s.tool() == Some(*tool),
+                Button::Danger => s.danger(),
                 _ => false,
             };
             let bg = if active {
@@ -445,6 +553,45 @@ fn icon(pm: &mut Pixmap, b: Button, r: Rect, k: f32, current: Color, t: Transfor
                 return;
             }
         }
+        Button::Tool(Tool::Redact) => {
+            // залитый брусок — закрашенная строка
+            let (ax, ay) = at(0.24, 0.38);
+            let (bx, by) = at(0.76, 0.62);
+            pb.push_rect(tiny_skia::Rect::from_ltrb(ax, ay, bx, by).expect("прямоугольник"));
+            if let Some(path) = pb.finish() {
+                pm.fill_path(&path, &white, FillRule::Winding, t, None);
+            }
+            return;
+        }
+        Button::Danger => {
+            // треугольник с восклицательным знаком
+            let (ax, ay) = at(0.50, 0.24);
+            let (bx, by) = at(0.78, 0.74);
+            let (cx, _) = at(0.22, 0.74);
+            pb.move_to(ax, ay);
+            pb.line_to(bx, by);
+            pb.line_to(cx, by);
+            pb.close();
+            let (mx, my) = at(0.50, 0.42);
+            let (_, ny) = at(0.50, 0.58);
+            pb.move_to(mx, my);
+            pb.line_to(mx, ny);
+            let (_, dy) = at(0.50, 0.66);
+            pb.move_to(mx, dy);
+            pb.line_to(mx, dy + 0.5 * k);
+        }
+        Button::RedactAll => {
+            // три залитых бруска — всё закрашено
+            for fy in [0.26, 0.45, 0.64] {
+                let (ax, ay) = at(0.24, fy);
+                let (bx, by) = at(0.76, fy + 0.11);
+                pb.push_rect(tiny_skia::Rect::from_ltrb(ax, ay, bx, by).expect("прямоугольник"));
+            }
+            if let Some(path) = pb.finish() {
+                pm.fill_path(&path, &white, FillRule::Winding, t, None);
+            }
+            return;
+        }
         Button::Undo => {
             // дуга против часовой со стрелкой
             let (sx, sy) = at(0.70, 0.66);
@@ -514,6 +661,9 @@ fn tip_text(b: Button, lang: Lang) -> &'static str {
         Button::Tool(Tool::Arrow) => Msg::TipArrow,
         Button::Tool(Tool::Rect) => Msg::TipRect,
         Button::Tool(Tool::Text) => Msg::TipText,
+        Button::Tool(Tool::Redact) => Msg::TipRedact,
+        Button::Danger => Msg::TipDanger,
+        Button::RedactAll => Msg::TipRedactAll,
         Button::Color(Color::Red) => Msg::TipRed,
         Button::Color(Color::Blue) => Msg::TipBlue,
         Button::Undo => Msg::TipUndo,
@@ -813,7 +963,7 @@ mod tests {
         let sel = Rect { x: 20, y: 30, w: 50, h: 40 };
         // горизонтальная красная линия по y = 50 кадра → y = 20 снимка
         let m = Mark { shape: Shape::Line(P::new(25.0, 50.0), P::new(65.0, 50.0)), color: Color::Red, width: 6.0 };
-        let img = bake(&f, sel, std::slice::from_ref(&m), None);
+        let img = bake(&f, sel, std::slice::from_ref(&m), None, &[]);
         assert_eq!((img.width(), img.height()), (50, 40));
         let on = img.get(25, 20);
         assert!((on >> 16) & 0xFF > 200 && on & 0xFF < 80, "красный на линии: {on:#x}");
@@ -825,7 +975,7 @@ mod tests {
         let f = Image::from_pixels(200, 80, vec![0xFF00_0000; 16_000]);
         let sel = Rect { x: 0, y: 0, w: 200, h: 80 };
         let m = Mark { shape: Shape::Text { at: P::new(10.0, 10.0), text: "Тут".into(), size: 30.0 }, color: Color::Blue, width: 4.0 };
-        let img = bake(&f, sel, &[m], None);
+        let img = bake(&f, sel, &[m], None, &[]);
         assert!(img.pixels().iter().any(|p| *p & 0xFF > 200), "синий текст есть");
     }
 }

@@ -71,7 +71,7 @@ wtype -M ctrl -k Print -m ctrl; sleep 1; mouse drag 300 200 900 600; sleep 0.2
 wtype -M ctrl s -m ctrl; sleep 0.6
 [ "$(ls "$shots"/*.png 2>/dev/null | wc -l)" = 1 ] && ok "Ctrl+S сохранил файл" || bad "Ctrl+S: $(ls "$shots")"
 wtype -M ctrl -k Print -m ctrl; sleep 1; mouse drag 300 200 900 600; sleep 0.2
-bar_w=$((4*2 + 32*11 + 10*3)); fx=$((900 - bar_w + 4 + 32*8 + 10*2 + 16)); fy=$((600 + 8 + 4 + 16))
+bar_w=$((4*2 + 32*14 + 10*4)); fx=$((900 - bar_w + 4 + 32*11 + 10*3 + 16)); fy=$((600 + 8 + 4 + 16))
 mouse click $fx $fy; sleep 0.4
 grim "$out/3-picker.png"
 wtype -k Return; sleep 0.2; wtype -M ctrl s -m ctrl; sleep 0.6

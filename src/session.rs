@@ -3,6 +3,7 @@
 
 use crate::annot::{self, Color, Mark, Marks, Shape, Tool, P};
 use crate::platform::Monitor;
+use crate::redact::Finding;
 use crate::toolbar::{self, Bar, Button as BarButton};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +158,22 @@ pub struct Session {
     pointer: Option<Pt>,
     hover: Option<BarButton>,
     preview: bool,
+    /// Найденное опасное (координаты кадра) и закрашено ли
+    findings: Vec<(Finding, bool)>,
+    /// Режим «Опасное»: найденное подсвечено, щелчок закрашивает
+    danger: bool,
+    detect: Detect,
+    hover_finding: Option<usize>,
+}
+
+/// Состояние поиска опасного.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detect {
+    /// Распознавание текста недоступно (или выключено `--no-detect`)
+    Off,
+    /// Идёт распознавание
+    Searching,
+    Done,
 }
 
 impl Session {
@@ -182,7 +199,82 @@ impl Session {
             pointer: None,
             hover: None,
             preview: false,
+            findings: Vec::new(),
+            danger: false,
+            detect: Detect::Off,
+            hover_finding: None,
         }
+    }
+
+    // ---------- поиск опасного ----------
+
+    /// Распознавание запущено: режим «Опасное» включён, ждём находок.
+    pub fn start_detect(&mut self) {
+        self.detect = Detect::Searching;
+        self.danger = true;
+    }
+
+    pub fn set_findings(&mut self, findings: Vec<Finding>) {
+        self.findings = findings.into_iter().map(|f| (f, false)).collect();
+        self.detect = Detect::Done;
+    }
+
+    pub fn detect(&self) -> Detect {
+        self.detect
+    }
+
+    pub fn danger(&self) -> bool {
+        self.danger
+    }
+
+    /// Находки внутри зоны: (номер, находка, закрашена).
+    pub fn findings(&self) -> impl Iterator<Item = (usize, &Finding, bool)> {
+        let sel = self.sel;
+        self.findings
+            .iter()
+            .enumerate()
+            .filter(move |(_, (f, _))| sel.is_some_and(|s| inside(s, f.bounds())))
+            .map(|(i, (f, r))| (i, f, *r))
+    }
+
+    pub fn hover_finding(&self) -> Option<&Finding> {
+        self.hover_finding.and_then(|i| self.findings.get(i)).map(|(f, _)| f)
+    }
+
+    /// Прямоугольники закрашенных находок — уходят в снимок вместе с пометками.
+    pub fn redactions(&self) -> Vec<Rect> {
+        self.findings.iter().filter(|(_, r)| *r).flat_map(|(f, _)| f.rects.iter().copied()).collect()
+    }
+
+    fn finding_at(&self, p: Pt) -> Option<usize> {
+        if !self.danger {
+            return None;
+        }
+        self.findings().find(|(_, f, _)| f.contains(p.x, p.y)).map(|(i, _, _)| i)
+    }
+
+    /// Щелчок по находке — закрасить или снять закраску (с инструментом или без него).
+    fn toggle_finding(&mut self, p: Pt) -> bool {
+        let tool_ok = matches!(self.tool, None | Some(Tool::Redact));
+        match self.finding_at(p) {
+            Some(i) if tool_ok => {
+                self.findings[i].1 = !self.findings[i].1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn redact_all(&mut self) -> Outcome {
+        let ids: Vec<usize> = self.findings().map(|(i, _, _)| i).collect();
+        if ids.is_empty() {
+            return Outcome::Nothing;
+        }
+        for i in ids {
+            self.findings[i].1 = true;
+        }
+        self.danger = true;
+        Outcome::Redraw
     }
 
     // ---------- то, что нужно отрисовке ----------
@@ -239,6 +331,7 @@ impl Session {
             Tool::Line => Shape::Line(*anchor, if self.shift { annot::snap45(*anchor, *end) } else { *end }),
             Tool::Arrow => Shape::Arrow(*anchor, if self.shift { annot::snap45(*anchor, *end) } else { *end }),
             Tool::Rect => Shape::Rect(*anchor, if self.shift { annot::square(*anchor, *end) } else { *end }),
+            Tool::Redact => Shape::Redact(*anchor, *end),
             Tool::Text => return None,
         };
         Some(Mark { shape, color: self.color, width: self.stroke })
@@ -272,7 +365,7 @@ impl Session {
         if !matches!(self.drag, Drag::None) {
             return self.cursor();
         }
-        if self.toolbar().is_some_and(|b| b.contains(p)) {
+        if self.toolbar().is_some_and(|b| b.contains(p)) || self.finding_at(p).is_some() {
             return Cursor::Arrow;
         }
         match self.sel {
@@ -351,8 +444,10 @@ impl Session {
             Input::Move(p) => {
                 self.pointer = Some(p);
                 let hover = self.toolbar().and_then(|b| b.hit(p));
-                let mut redraw = hover != self.hover || self.preview;
+                let hf = if hover.is_none() && matches!(self.drag, Drag::None) { self.finding_at(p) } else { None };
+                let mut redraw = hover != self.hover || self.preview || hf != self.hover_finding;
                 self.hover = hover;
+                self.hover_finding = hf;
                 self.preview = false;
                 if self.drag_to(p) == Outcome::Redraw {
                     redraw = true;
@@ -414,6 +509,9 @@ impl Session {
                 };
             }
         }
+        if self.editing.is_none() && self.toggle_finding(p) {
+            return Outcome::Redraw;
+        }
         let committed = self.commit_edit();
         self.drag = match self.sel {
             Some(sel) => match hit(sel, p) {
@@ -467,6 +565,11 @@ impl Session {
                 Outcome::Redraw
             }
             BarButton::Save => self.finish(Outcome::SaveAs),
+            BarButton::Danger => {
+                self.danger = !self.danger;
+                Outcome::Redraw
+            }
+            BarButton::RedactAll => self.redact_all(),
             BarButton::Copy => self.finish(Outcome::Confirm),
             BarButton::Close => Outcome::Cancel,
         }
@@ -570,6 +673,11 @@ impl Session {
                 self.color = self.color.other();
                 return Outcome::Redraw;
             }
+            Key::Letter('D') if shift => return self.redact_all(),
+            Key::Letter('D') => {
+                self.danger = !self.danger;
+                return Outcome::Redraw;
+            }
             Key::Letter(c) => {
                 return match Tool::from_key(c) {
                     Some(t) => {
@@ -634,4 +742,9 @@ fn edges_cursor(e: Edges) -> Cursor {
         (true, false) => Cursor::ResizeWe,
         _ => Cursor::ResizeNs,
     }
+}
+
+/// Прямоугольник `inner` целиком внутри `outer`.
+fn inside(outer: Rect, inner: Rect) -> bool {
+    inner.x >= outer.x && inner.y >= outer.y && inner.right() <= outer.right() && inner.bottom() <= outer.bottom()
 }

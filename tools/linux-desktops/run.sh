@@ -112,7 +112,7 @@ start; xdotool mousemove 300 200 mousedown 1 mousemove 900 600 mouseup 1; sleep 
 xdotool key ctrl+s; sleep 0.6
 [ "$(ls "$shots"/*.png 2>/dev/null | wc -l)" = 1 ] && ok "Ctrl+S сохранил файл" || bad "Ctrl+S: $(ls "$shots")"
 start; xdotool mousemove 300 200 mousedown 1 mousemove 900 600 mouseup 1; sleep 0.3
-bar_w=$((4*2 + 32*11 + 10*3)); fx=$((900 - bar_w + 4 + 32*8 + 10*2 + 16)); fy=$((600 + 8 + 4 + 16))
+bar_w=$((4*2 + 32*14 + 10*4)); fx=$((900 - bar_w + 4 + 32*11 + 10*3 + 16)); fy=$((600 + 8 + 4 + 16))
 xdotool mousemove $fx $fy click 1; sleep 0.5
 shot_png 4-picker
 xdotool key Return; sleep 0.2; xdotool key ctrl+s; sleep 0.6
