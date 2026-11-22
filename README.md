@@ -33,6 +33,11 @@ target\release\zyrik.exe --help
 Проверка в контейнере: `docker build -t zyrik-x11 tools/linux-test && docker run --rm -v "$PWD:/src:ro" zyrik-x11`.
 На настоящих рабочих столах (KDE Plasma, XFCE, GNOME) — `tools/linux-desktops/`, порядок запуска в его Dockerfile.
 
+## macOS (14+)
+
+`bash tools/macos/bundle.sh` (на Mac) → `target/macos/Зырик.app` и `Zyrik-macos.zip`; готовый zip — артефакт CI `zyrik-macos`.
+Горячая клавиша по умолчанию Cmd+Shift+2. При первом снимке macOS попросит разрешение «Запись экрана»; после каждой новой сборки (подпись ad-hoc) разрешение придётся выдать заново.
+
 ## Структура
 
 | Путь | Что там |
@@ -53,4 +58,4 @@ target\release\zyrik.exe --help
 
 | Фича | Спека | План | Задачи | Код |
 |---|---|---|---|---|
-| 001 — базовый захват экрана | готова к ревью | черновик | черновик | фаза 4: Windows, Linux X11; macOS — в работе |
+| 001 — базовый захват экрана | готова к ревью | черновик | черновик | фаза 4: Windows, Linux X11, macOS |

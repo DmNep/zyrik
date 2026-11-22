@@ -155,9 +155,15 @@
 Не проверено: HiDPI (`Xft.dpi`), несколько мониторов, Cinnamon/MATE.
 
 - [x] T048 **D7 решено (2026-11-22): `Зырик.app` в zip.** Проверка — в GitHub Actions на macOS (приватный репозиторий).
-- [ ] T049 [P] `src/mac/`: Carbon hotkey, ScreenCaptureKit, `NSWindow` поверх всего на каждом мониторе, `NSStatusItem`, `NSSavePanel`, `sem_open`; сообщение, если нет разрешения «Запись экрана».
-- [ ] T050 [P] `src/mac/clipboard.rs`: `NSPasteboard` + `org.nspasteboard.TransientType`, `ConcealedType`.
-- [ ] T051 Упаковка macOS по итогам T048 (Info.plist, `NSScreenCaptureUsageDescription`).
+- [x] T049 [P] `src/mac/`: Carbon hotkey, ScreenCaptureKit, `NSWindow` поверх всего на каждом мониторе, `NSStatusItem`, `NSSavePanel`, `sem_open`; сообщение, если нет разрешения «Запись экрана».
+- [x] T050 [P] `src/mac/` (буфер): `NSPasteboard` + `org.nspasteboard.TransientType`, `ConcealedType`.
+- [x] T051 Упаковка macOS по итогам T048 (Info.plist, `NSScreenCaptureUsageDescription`).
+
+*Итог macOS (2026-11-22):* `src/mac/` (AppKit, ScreenCaptureKit, Carbon), `tools/macos/bundle.sh` → `Зырик.app` в zip (ad-hoc подпись), `tools/macos/smoke.sh` в CI на `macos-latest` (Apple Silicon, экран 1024×768):
+- `--help`, запуск, «Запись экрана» выдана через TCC.db машины CI, Cmd+Shift+2 → выделение, мышь (cliclick), Cmd+S → PNG;
+- в буфере обещан PNG с пометками Transient/Concealed; без Cmd не отдаётся; с Cmd отдаётся; отпустили Cmd — буфер очищен.
+Найдено и исправлено: macOS после отказа больше не спрашивает данные у того же обещания — кладём новое (до 20 раз); `NSEvent.modifierFlags` не видел отпускания Cmd — берём `CGEventSourceFlagsState`; сообщение «старое обещание не нужно» могло затереть новый снимок — флаг записи.
+Не проверено: вживую на Mac руками (рисование, меню в строке меню, Retina и несколько мониторов, менеджеры буфера вроде Maccy). Первый снимок после запуска — 0,3–0,9 с (ScreenCaptureKit), дальше 0,1–0,2 с; SC-001 (≤ 200 мс) на первом снимке не выполняется.
 
 **Контрольная точка 4**: сценарии историй 1–3, 7, 8 на Ubuntu (X11), KDE (X11) и macOS 14. CI `no-disk` зелёный.
 
