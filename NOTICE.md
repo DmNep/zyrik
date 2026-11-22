@@ -2,10 +2,23 @@
 
 Что встроено сейчас — ниже. По мере добавления здесь появятся и другие лицензии:
 
-- Tesseract (Apache-2.0) и Leptonica (BSD-2-Clause) — распознавание текста, фаза 6;
-- модели `tessdata_fast` `eng`, `rus` (Apache-2.0);
 
 Значок «о_О» нарисован скриптом `tools/make_icon.py` и распространяется под лицензией проекта (MIT).
+
+## Tesseract OCR — `third_party/tesseract` (подмодуль, 5.5.4)
+
+Apache License 2.0. Copyright (c) Google и участники проекта tesseract-ocr. Собирается статически
+(`tools/ocr-build.sh`) и входит в сборки с фичей `ocr`.
+
+## Leptonica — `third_party/leptonica` (подмодуль, 1.87.0)
+
+Лицензия в стиле BSD 2-Clause. Copyright (c) 2001 Leptonica (Dan Bloomberg).
+
+## Модели tessdata_fast — `assets/tessdata/{eng,rus}.traineddata`
+
+Apache License 2.0, из репозитория tesseract-ocr/tessdata_fast. SHA-256:
+`eng` 7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2,
+`rus` e16e5e036cce1d9ec2b00063cf8b54472625b9e14d893a169e2b0dedeb4df225.
 
 ## DejaVu Sans Bold — `assets/DejaVuSans-Bold-zyrik.ttf`
 

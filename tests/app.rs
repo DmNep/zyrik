@@ -277,7 +277,9 @@ fn hotkey_while_selecting_is_ignored_then_works_again() {
     ]);
     let f = go(fake, &[]);
     assert_eq!(f.captures, 2, "второе нажатие при открытом выделении не снимает");
-    assert!(f.scheduled.is_empty());
+    // «Зырнуть через 3 с» при открытом выделении тоже ничего не планирует
+    // (таймер Tick — это опрос распознавания, он есть в сборке с фичей ocr)
+    assert!(f.scheduled.iter().all(|(c, _)| *c == Command::Tick), "{:?}", f.scheduled);
 }
 
 #[test]

@@ -35,7 +35,13 @@ pub fn recognize(frame: &Image) -> Vec<Vec<Word>> {
     for p in frame.pixels() {
         rgb.extend_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
     }
-    ffi::MODELS.iter().map(|(lang, model)| ffi::words(model, lang, &rgb, frame.width(), frame.height())).collect()
+    // модели независимы — распознаём параллельно (у каждой свой TessBaseAPI)
+    let (w, h) = (frame.width(), frame.height());
+    let rgb: &[u8] = &rgb;
+    std::thread::scope(|s| {
+        let runs: Vec<_> = ffi::MODELS.iter().map(|(lang, model)| s.spawn(move || ffi::words(model, lang, rgb, w, h))).collect();
+        runs.into_iter().map(|r| r.join().unwrap_or_default()).collect()
+    })
 }
 
 #[cfg(feature = "ocr")]
