@@ -176,10 +176,19 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                     Outcome::Confirm(rect) => {
                         let shot = a.bake(rect);
                         let what = shot_name(lang, a.shot);
-                        p.hide_overlay();
-                        active = None;
                         let (sw, sh) = (shot.width(), shot.height());
-                        match p.set_clipboard_image(shot) {
+                        // обычно буфер — после того, как окно спрятано; на Wayland без data-control —
+                        // пока окно ещё в фокусе, иначе композитор буфер не даст
+                        let result = if p.clipboard_needs_focus() {
+                            let r = p.set_clipboard_image(shot);
+                            p.hide_overlay();
+                            r
+                        } else {
+                            p.hide_overlay();
+                            p.set_clipboard_image(shot)
+                        };
+                        active = None;
+                        match result {
                             Ok(()) => p.debug_log(&format!(
                                 "{} {sw}x{sh}",
                                 lang.fmt(Msg::LogCaptured, &[("shot", what)])

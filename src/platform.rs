@@ -128,6 +128,12 @@ pub trait Platform {
     /// Содержимое буфера программа не читает никогда.
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem>;
 
+    /// Буфер можно занять, только пока окно выделения в фокусе (Wayland без data-control,
+    /// например GNOME). Тогда ядро кладёт снимок в буфер до того, как спрятать окно.
+    fn clipboard_needs_focus(&self) -> bool {
+        false
+    }
+
     /// Известные папки («Изображения» первой — она же папка по умолчанию для Ctrl+S) и диски.
     /// Только узнать пути: ничего не открывать и не создавать.
     fn places(&self) -> Vec<Place>;

@@ -10,6 +10,8 @@ mod clipboard;
 mod conn;
 pub(crate) mod instance;
 pub(crate) mod keys;
+mod kwin;
+mod portal;
 pub(crate) mod tray;
 mod wayland;
 

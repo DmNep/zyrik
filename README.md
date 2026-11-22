@@ -69,11 +69,43 @@ PNG сохраняется без метаданных: в файле тольк
 
 ## Linux
 
-Один файл `zyrik-0.1.0-linux-x86_64` для обычных дистрибутивов с glibc, работает в X11. Wayland — следующий этап. Ничего доустанавливать не нужно: X11 и D-Bus реализованы на Rust внутри программы.
+Один файл `zyrik-0.1.0-linux-x86_64` для обычных дистрибутивов с glibc. Ничего доустанавливать не нужно: X11, Wayland и D-Bus реализованы на Rust внутри программы. Зырик сам выбирает Wayland, если он есть, иначе X11 (`ZYRIK_X11=1` — принудительно X11).
 
-Значок появляется в трее KDE Plasma, XFCE и Cinnamon. В GNOME — с расширением AppIndicator (в Ubuntu оно есть сразу). Если трея нет, работает горячая клавиша.
+Значок появляется в трее KDE Plasma, XFCE и Cinnamon, в GNOME — с расширением AppIndicator (в Ubuntu оно есть сразу). Если трея нет, работает горячая клавиша.
 
-Проверено в Docker на KDE Plasma 5.27, XFCE 4.18 и GNOME 46 (Ubuntu 24.04), сценарии лежат в `tools/linux-desktops/`. Сценарий для CI — `tools/linux-test/`: он запускает Зырик под `strace` и проверяет, что на диск пишутся только сохранённые снимки, а все соединения местные.
+### X11
+
+Горячая клавиша — `--key`, как в Windows. Проверено в Docker на KDE Plasma 5.27, XFCE 4.18 и GNOME 46 (`tools/linux-desktops/`) и в CI под `strace` (`tools/linux-test/`): на диск пишутся только сохранённые снимки, все соединения местные.
+
+### Wayland
+
+Wayland не даёт программам глобальных клавиш: клавишу задают в настройках рабочего стола или композитора на команду `zyrik --trigger`. Она только просит уже запущенный Зырик зырнуть (через местный сокет, команды принимаются только от того же пользователя).
+
+| Рабочий стол | Снимок экрана | Окно выделения | Буфер | Клавиша |
+|---|---|---|---|---|
+| Sway, river, Wayfire и др. на wlroots | `wlr-screencopy`, в память | поверх всего (layer-shell) | data-control | `bindsym Ctrl+Print exec zyrik --trigger` |
+| Hyprland | так же | так же | так же | `bind = CTRL, Print, exec, zyrik --trigger` |
+| KDE Plasma 6 | KWin ScreenShot2 — в память, без файла; нужен `.desktop`, см. ниже | поверх всего (layer-shell) | ext-data-control | «Параметры → Клавиатура → Комбинации клавиш → Добавить команду» |
+| GNOME | портал Screenshot: файл, который Зырик сразу читает, затирает и удаляет | полноэкранное окно | пока окно в фокусе | «Настройки → Клавиатура → Свои комбинации» |
+
+Автозапуск: в Sway — `exec zyrik`, в Hyprland — `exec-once = zyrik`, в KDE и GNOME — через настройки автозапуска.
+
+**KDE Plasma.** KWin отдаёт снимок без файла только программам, у которых есть `.desktop`-файл с разрешением. Положите такой файл в `~/.local/share/applications/zyrik.desktop` (путь в `Exec` — к вашему файлу Зырика):
+
+```
+[Desktop Entry]
+Type=Application
+Name=Zyrik
+Exec=/home/вы/bin/zyrik
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
+NoDisplay=true
+```
+
+Без него Зырик снимает через портал, как в GNOME.
+
+**Одноразовый буфер под Wayland.** Узнать, зажат ли Ctrl, Wayland программе не даёт. Поэтому так: запросы в первые 0,3 с после копирования — это менеджеры буфера, им снимок не отдаётся; вставка человеком позже получает снимок, а через 1,5 с после последней вставки буфер очищается. Встроенный менеджер буфера GNOME тоже ничего не получает: его копия пустая.
+
+Проверено в Docker: Sway 1.9 — целиком, со снимком экрана (`tools/wayland-test/`, и в CI); KDE Plasma 6.8 и GNOME (Mutter 51) — окно выделения, мышь, клавиши, буфер, `Ctrl+S` (`tools/wayland-desktops/`). Снимок экрана на KDE и GNOME в контейнере не проверить: KWin без видеокарты падает в своём модуле снимков, порталу GNOME нужен полный сеанс. Hyprland в контейнере не запускается (нужна видеокарта); у него те же протоколы, что у Sway.
 
 ## macOS
 
@@ -107,18 +139,19 @@ cargo build --release
 | `specs/001-core-capture/plan.md` | Как делаем: стек, архитектура, решения |
 | `specs/001-core-capture/tasks.md` | Задачи по фазам с итогами проверок |
 
-Сделано: захват области, пометки, буфер, сохранение на Windows, Linux X11 и macOS. Дальше: Wayland, распознавание и закраска приватных данных на снимке (пароли, ключи, номера карт), снимок всего экрана и окна, задержка перед снимком.
+Сделано: захват области, пометки, буфер, сохранение на Windows, Linux (X11 и Wayland) и macOS. Дальше: распознавание и закраска приватных данных на снимке (пароли, ключи, номера карт), снимок всего экрана и окна, задержка перед снимком.
 
 ## Ограничения
 
-- Linux — только X11. Под Wayland (кроме приложений через XWayland) Зырик пока не работает.
+- Wayland: горячую клавишу задают в настройках рабочего стола на `zyrik --trigger`; в GNOME снимок на мгновение оказывается в файле (портал), Зырик сразу его затирает и удаляет. Снимок экрана на KDE и GNOME, а также Hyprland проверены не вживую.
+- Wayland: буфер очищается через 1,5 с после вставки, а не по отпусканию Ctrl.
 - `--key-screen`, `--key-window`, `--clear-clipboard` и `--no-detect` уже принимаются, но пока не действуют: снимок экрана и окна, очистка буфера по таймеру и поиск приватных данных — следующие этапы. Любая клавиша сейчас открывает выделение области.
 - На Маке первый снимок после запуска появляется за 0,3–0,9 с, следующие — за 0,1–0,2 с.
 - Выбор папки показывает только папки; имя файла задаётся автоматически по дате и времени, новую папку из него не создать.
 
 ## English
 
-Zyrik is a screenshot tool for Windows, Linux (X11), and macOS that never leaks. Press `Ctrl+PrtScr` (`Cmd+Shift+2` on a Mac), select an area, optionally draw arrows, boxes, or captions, and press `Enter`: the shot goes to the clipboard as a one-time paste. It is handed out only to a paste with `Ctrl`/`Cmd` held, and the clipboard is cleared when the key is released; background clipboard readers get nothing, and the shot is marked to stay out of clipboard history and cloud sync. `Ctrl+S` saves a metadata-free PNG to the last folder (`--save-dir` or Pictures) without overwriting files; the floppy button opens Zyrik's own folder picker, because the Windows save dialog writes the program name and folder to the registry. Zyrik never opens a network connection, writes nothing to disk except the files you save, keeps no settings (use launch options, see `zyrik --help`), and wipes the shot from memory after paste or cancel.
+Zyrik is a screenshot tool for Windows, Linux (X11 and Wayland), and macOS that never leaks. Press `Ctrl+PrtScr` (`Cmd+Shift+2` on a Mac), select an area, optionally draw arrows, boxes, or captions, and press `Enter`: the shot goes to the clipboard as a one-time paste. It is handed out only to a paste with `Ctrl`/`Cmd` held, and the clipboard is cleared when the key is released; background clipboard readers get nothing, and the shot is marked to stay out of clipboard history and cloud sync. `Ctrl+S` saves a metadata-free PNG to the last folder (`--save-dir` or Pictures) without overwriting files; the floppy button opens Zyrik's own folder picker, because the Windows save dialog writes the program name and folder to the registry. Zyrik never opens a network connection, writes nothing to disk except the files you save, keeps no settings (use launch options, see `zyrik --help`), and wipes the shot from memory after paste or cancel. On Wayland, bind `zyrik --trigger` to a key in your compositor or desktop settings.
 
 ## License
 

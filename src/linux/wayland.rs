@@ -4,7 +4,9 @@
 //! - Захват: `wlr-screencopy` (Sway, Hyprland, river…) в память через `memfd` — не файл на диске.
 //! - Окно выделения: `wlr-layer-shell`, слой overlay, по поверхности на монитор; клавиатура —
 //!   эксклюзивно. Размер в пикселях общего кадра, `wp_viewporter` растягивает до логического размера.
-//! - Буфер: `wlr-data-control` — снимок отдаётся по запросу, с `x-kde-passwordManagerHint`.
+//! - Буфер: `ext-data-control` (KDE Plasma 6), `wlr-data-control` (wlroots) или, где их нет (GNOME),
+//!   обычный `wl_data_device` — его можно занять, только пока окно выделения в фокусе.
+//!   Снимок отдаётся по запросу, с `x-kde-passwordManagerHint`.
 //! - Горячая клавиша: Wayland не даёт её программам — бинд в конфиге композитора на `zyrik --trigger`.
 //!
 //! Принцип I: соединение только с сокетом композитора (`$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`).
@@ -22,6 +24,10 @@ use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
     wl_buffer::{self, WlBuffer},
     wl_compositor::WlCompositor,
+    wl_data_device::{self, WlDataDevice},
+    wl_data_device_manager::WlDataDeviceManager,
+    wl_data_offer::WlDataOffer,
+    wl_data_source::{self, WlDataSource},
     wl_keyboard::{self, WlKeyboard},
     wl_output::{self, WlOutput},
     wl_pointer::{self, WlPointer},
@@ -32,11 +38,22 @@ use wayland_client::protocol::{
     wl_surface::WlSurface,
 };
 use wayland_client::{delegate_noop, event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
+use wayland_protocols::ext::data_control::v1::client::{
+    ext_data_control_device_v1::{self, ExtDataControlDeviceV1},
+    ext_data_control_manager_v1::ExtDataControlManagerV1,
+    ext_data_control_offer_v1::ExtDataControlOfferV1,
+    ext_data_control_source_v1::{self, ExtDataControlSourceV1},
+};
 use wayland_protocols::wp::cursor_shape::v1::client::{
     wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1},
     wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
 };
 use wayland_protocols::wp::viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter};
+use wayland_protocols::xdg::shell::client::{
+    xdg_surface::{self, XdgSurface},
+    xdg_toplevel::{self, XdgToplevel},
+    xdg_wm_base::{self, XdgWmBase},
+};
 use wayland_protocols::xdg::xdg_output::zv1::client::{
     zxdg_output_manager_v1::ZxdgOutputManagerV1,
     zxdg_output_v1::{self, ZxdgOutputV1},
@@ -151,10 +168,17 @@ struct Output {
     px: Rect,
 }
 
+/// Роль окна выделения: слой поверх всего (wlr-layer-shell) или, где его нет (GNOME),
+/// полноэкранное окно.
+enum Role {
+    Layer(ZwlrLayerSurfaceV1),
+    Toplevel(XdgSurface, XdgToplevel),
+}
+
 /// Поверхность выделения на одном мониторе.
 struct OverlaySurface {
     surface: WlSurface,
-    layer: ZwlrLayerSurfaceV1,
+    role: Role,
     viewport: Option<WpViewport>,
     configured: bool,
     buffers: Vec<(Shm, bool)>,
@@ -169,10 +193,44 @@ struct Copy {
     y_invert: bool,
 }
 
+/// Источник данных буфера — по тому, что умеет композитор.
+#[derive(Clone, PartialEq)]
+enum Source {
+    Ext(ExtDataControlSourceV1),
+    Wlr(ZwlrDataControlSourceV1),
+    Core(WlDataSource),
+}
+
+impl Source {
+    fn offer(&self, mime: &str) {
+        match self {
+            Source::Ext(s) => s.offer(mime.into()),
+            Source::Wlr(s) => s.offer(mime.into()),
+            Source::Core(s) => s.offer(mime.into()),
+        }
+    }
+
+    fn destroy(&self) {
+        match self {
+            Source::Ext(s) => s.destroy(),
+            Source::Wlr(s) => s.destroy(),
+            Source::Core(s) => s.destroy(),
+        }
+    }
+}
+
+/// Как класть в буфер.
+enum ClipDevice {
+    Ext(ExtDataControlManagerV1, ExtDataControlDeviceV1),
+    Wlr(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1),
+    Core(WlDataDeviceManager, WlDataDevice),
+    None,
+}
+
 struct Clip {
     image: Option<Image>,
     png: Option<Zeroizing<Vec<u8>>>,
-    source: Option<ZwlrDataControlSourceV1>,
+    source: Option<Source>,
     set_at: Instant,
     /// Когда очистить буфер (после отданной вставки)
     clear_at: Option<Instant>,
@@ -190,6 +248,8 @@ pub struct State {
     pointer_serial: u32,
     /// Последняя точка курсора: кнопкам Wayland координат не присылает
     pointer: Pt,
+    /// Номер последнего события ввода — для `wl_data_device.set_selection`
+    input_serial: u32,
     last_click: Option<(Instant, Pt)>,
     wheel_acc: f64,
     scale: f64,
@@ -208,10 +268,10 @@ pub struct Wayland {
     state: State,
     compositor: WlCompositor,
     shm: WlShm,
-    layer_shell: ZwlrLayerShellV1,
+    layer_shell: Option<ZwlrLayerShellV1>,
+    wm_base: Option<XdgWmBase>,
     screencopy: Option<ZwlrScreencopyManagerV1>,
-    data_control: Option<ZwlrDataControlManagerV1>,
-    data_device: Option<ZwlrDataControlDeviceV1>,
+    clip_device: ClipDevice,
     viewporter: Option<WpViewporter>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -229,12 +289,16 @@ impl Wayland {
         let qh = queue.handle();
         let compositor: WlCompositor = globals.bind(&qh, 4..=6, ()).map_err(|e| format!("wl_compositor: {e}"))?;
         let shm: WlShm = globals.bind(&qh, 1..=1, ()).map_err(|e| format!("wl_shm: {e}"))?;
-        let layer_shell: ZwlrLayerShellV1 = globals
-            .bind(&qh, 1..=4, ())
-            .map_err(|_| "композитор не поддерживает wlr-layer-shell (GNOME): окно выделения поверх всего не открыть".to_string())?;
+        let layer_shell: Option<ZwlrLayerShellV1> = globals.bind(&qh, 1..=4, ()).ok();
+        let wm_base: Option<XdgWmBase> = globals.bind(&qh, 1..=5, ()).ok();
+        if layer_shell.is_none() && wm_base.is_none() {
+            return Err("композитор не даёт ни wlr-layer-shell, ни xdg-shell".into());
+        }
         let seat: WlSeat = globals.bind(&qh, 1..=7, ()).map_err(|e| format!("wl_seat: {e}"))?;
         let screencopy: Option<ZwlrScreencopyManagerV1> = globals.bind(&qh, 1..=3, ()).ok();
-        let data_control: Option<ZwlrDataControlManagerV1> = globals.bind(&qh, 1..=2, ()).ok();
+        let ext_control: Option<ExtDataControlManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
+        let wlr_control: Option<ZwlrDataControlManagerV1> = globals.bind(&qh, 1..=2, ()).ok();
+        let core_dd: Option<WlDataDeviceManager> = globals.bind(&qh, 3..=3, ()).ok();
         let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
         let xdg_outputs: Option<ZxdgOutputManagerV1> = globals.bind(&qh, 2..=3, ()).ok();
         let cursor_shape: Option<WpCursorShapeManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
@@ -250,6 +314,7 @@ impl Wayland {
             pointer_on: None,
             pointer_serial: 0,
             pointer: Pt { x: 0, y: 0 },
+            input_serial: 0,
             last_click: None,
             wheel_acc: 0.0,
             scale: 1.0,
@@ -268,7 +333,18 @@ impl Wayland {
             state.outputs.push(Output { wl: Some(wl), xdg, scale: 1, ..Output::default() });
         }
         // мышь и клавиатура — по событию capabilities у wl_seat
-        let data_device = data_control.as_ref().map(|m| m.get_data_device(&seat, &qh, ()));
+        let clip_device = if let Some(m) = ext_control {
+            let d = m.get_data_device(&seat, &qh, ());
+            ClipDevice::Ext(m, d)
+        } else if let Some(m) = wlr_control {
+            let d = m.get_data_device(&seat, &qh, ());
+            ClipDevice::Wlr(m, d)
+        } else if let Some(m) = core_dd {
+            let d = m.get_data_device(&seat, &qh, ());
+            ClipDevice::Core(m, d)
+        } else {
+            ClipDevice::None
+        };
         queue.roundtrip(&mut state).map_err(|e| e.to_string())?;
         queue.roundtrip(&mut state).map_err(|e| e.to_string())?;
         if state.outputs.is_empty() {
@@ -284,9 +360,9 @@ impl Wayland {
             compositor,
             shm,
             layer_shell,
+            wm_base,
             screencopy,
-            data_control,
-            data_device,
+            clip_device,
             viewporter,
             tx,
             rx,
@@ -366,6 +442,56 @@ impl Wayland {
         }
         frame.destroy();
         Ok((shm, self.state.copies[i].y_invert))
+    }
+
+    /// Без screencopy: KDE — KWin ScreenShot2 (через трубу, без файла); не вышло или не KDE —
+    /// портал (файл читается и сразу затирается, см. `portal`).
+    fn capture_portal(&mut self) -> Result<Frame, Problem> {
+        // только отладочная сборка: кадр из файла — проверка окна, ввода и буфера там, где
+        // снимок экрана в контейнере не снять (KWin без GPU)
+        #[cfg(debug_assertions)]
+        if let Some(p) = std::env::var_os("ZYRIK_TEST_FRAME") {
+            let data = std::fs::read(p).map_err(os)?;
+            let img = super::portal::decode(&data)?;
+            self.state.scale = 1.0;
+            let _ = self.layout();
+            let monitors = self.state.outputs.iter().map(|o| Monitor { rect: o.px, scale: 100 }).collect();
+            return Ok(Frame { x: 0, y: 0, image: img, monitors });
+        }
+        let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("KDE")));
+        let img = match kde.then(super::kwin::capture) {
+            Some(Ok(img)) => img,
+            Some(Err(super::kwin::Fail::NotAuthorized)) => {
+                self.debug_log("KWin не дал снимок без файла: нет zyrik.desktop с X-KDE-DBUS-Restricted-Interfaces (см. README) — пробую портал");
+                super::portal::screenshot()?
+            }
+            Some(Err(super::kwin::Fail::Other(e))) => {
+                self.debug_log(&format!("{e:?} — пробую портал"));
+                super::portal::screenshot()?
+            }
+            None => super::portal::screenshot()?,
+        };
+        let lw = self.state.outputs.iter().map(|o| o.logical.right()).max().unwrap_or(1)
+            - self.state.outputs.iter().map(|o| o.logical.x).min().unwrap_or(0);
+        self.state.scale = (f64::from(img.width()) / f64::from(lw.max(1))).max(1.0);
+        let (w, h) = self.layout();
+        let img = if (img.width(), img.height()) == (w, h) {
+            img
+        } else {
+            // портал отдал другой размер — подгоняем ближайшим пикселем
+            let mut px = vec![0xFF00_0000u32; (w * h) as usize];
+            for y in 0..h {
+                let sy = (u64::from(y) * u64::from(img.height()) / u64::from(h)) as u32;
+                for x in 0..w {
+                    let sx = (u64::from(x) * u64::from(img.width()) / u64::from(w)) as u32;
+                    px[(y * w + x) as usize] = img.get(sx, sy);
+                }
+            }
+            Image::from_pixels(w, h, px)
+        };
+        let scale = (self.state.scale * 100.0).round() as u32;
+        let monitors = self.state.outputs.iter().map(|o| Monitor { rect: o.px, scale }).collect();
+        Ok(Frame { x: 0, y: 0, image: img, monitors })
     }
 
     fn free_buffer(&mut self, i: usize) -> Result<usize, Problem> {
@@ -470,6 +596,9 @@ impl Platform for Wayland {
     }
 
     fn capture(&mut self) -> Result<Frame, Problem> {
+        if self.screencopy.is_none() {
+            return self.capture_portal();
+        }
         // масштаб — по первому снимку каждого монитора: пикселей на логическую точку
         let mut shots = Vec::new();
         for i in 0..self.state.outputs.len() {
@@ -513,10 +642,24 @@ impl Platform for Wayland {
         for i in 0..self.state.outputs.len() {
             let out = &self.state.outputs[i];
             let surface = self.compositor.create_surface(&self.qh, ());
-            let layer = self.layer_shell.get_layer_surface(&surface, out.wl.as_ref(), Layer::Overlay, "zyrik".into(), &self.qh, i);
-            layer.set_anchor(Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right);
-            layer.set_exclusive_zone(-1);
-            layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+            let role = match (&self.layer_shell, &self.wm_base) {
+                (Some(ls), _) => {
+                    let layer = ls.get_layer_surface(&surface, out.wl.as_ref(), Layer::Overlay, "zyrik".into(), &self.qh, i);
+                    layer.set_anchor(Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right);
+                    layer.set_exclusive_zone(-1);
+                    layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                    Role::Layer(layer)
+                }
+                (None, Some(wm)) => {
+                    let xs = wm.get_xdg_surface(&surface, &self.qh, i);
+                    let top = xs.get_toplevel(&self.qh, i);
+                    top.set_title("Zyrik".into());
+                    top.set_app_id("zyrik".into());
+                    top.set_fullscreen(out.wl.as_ref());
+                    Role::Toplevel(xs, top)
+                }
+                (None, None) => unreachable!("проверено в new"),
+            };
             let viewport = self.viewporter.as_ref().map(|v| {
                 let vp = v.get_viewport(&surface, &self.qh, ());
                 vp.set_destination(out.logical.w, out.logical.h);
@@ -526,7 +669,7 @@ impl Platform for Wayland {
                 surface.set_buffer_scale(self.state.scale.round() as i32);
             }
             surface.commit();
-            self.state.overlays.push(OverlaySurface { surface, layer, viewport, configured: false, buffers: Vec::new() });
+            self.state.overlays.push(OverlaySurface { surface, role, viewport, configured: false, buffers: Vec::new() });
         }
         let deadline = Instant::now() + COPY_TIMEOUT;
         while self.state.overlays.iter().any(|o| !o.configured) {
@@ -585,7 +728,13 @@ impl Platform for Wayland {
 
     fn hide_overlay(&mut self) {
         for o in self.state.overlays.drain(..) {
-            o.layer.destroy();
+            match o.role {
+                Role::Layer(l) => l.destroy(),
+                Role::Toplevel(xs, top) => {
+                    top.destroy();
+                    xs.destroy();
+                }
+            }
             if let Some(v) = o.viewport {
                 v.destroy();
             }
@@ -596,15 +745,28 @@ impl Platform for Wayland {
         let _ = self.queue.roundtrip(&mut self.state);
     }
 
+    /// Без data-control (GNOME) буфер можно занять, только пока окно выделения в фокусе.
+    fn clipboard_needs_focus(&self) -> bool {
+        matches!(self.clip_device, ClipDevice::Core(..))
+    }
+
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem> {
-        let (Some(mgr), Some(dev)) = (self.data_control.clone(), self.data_device.clone()) else {
-            return Err(Problem::Os("композитор не даёт работать с буфером (нет wlr-data-control)".into()));
-        };
         self.clear_clipboard();
-        let src = mgr.create_data_source(&self.qh, ());
-        src.offer("image/png".into());
-        src.offer("x-kde-passwordManagerHint".into());
-        dev.set_selection(Some(&src));
+        let qh = &self.qh;
+        let src = match &self.clip_device {
+            ClipDevice::Ext(m, _) => Source::Ext(m.create_data_source(qh, ())),
+            ClipDevice::Wlr(m, _) => Source::Wlr(m.create_data_source(qh, ())),
+            ClipDevice::Core(m, _) => Source::Core(m.create_data_source(qh, ())),
+            ClipDevice::None => return Err(Problem::Os("композитор не даёт буфер обмена".into())),
+        };
+        src.offer("image/png");
+        src.offer("x-kde-passwordManagerHint");
+        match (&self.clip_device, &src) {
+            (ClipDevice::Ext(_, d), Source::Ext(s)) => d.set_selection(Some(s)),
+            (ClipDevice::Wlr(_, d), Source::Wlr(s)) => d.set_selection(Some(s)),
+            (ClipDevice::Core(_, d), Source::Core(s)) => d.set_selection(Some(s), self.state.input_serial),
+            _ => {}
+        }
         let c = &mut self.state.clip;
         c.image = Some(image);
         c.source = Some(src);
@@ -664,6 +826,10 @@ delegate_noop!(State: ignore ZwlrLayerShellV1);
 delegate_noop!(State: ignore ZwlrScreencopyManagerV1);
 delegate_noop!(State: ignore ZwlrDataControlManagerV1);
 delegate_noop!(State: ignore ZwlrDataControlOfferV1);
+delegate_noop!(State: ignore ExtDataControlManagerV1);
+delegate_noop!(State: ignore ExtDataControlOfferV1);
+delegate_noop!(State: ignore WlDataDeviceManager);
+delegate_noop!(State: ignore WlDataOffer);
 delegate_noop!(State: ignore WpViewporter);
 delegate_noop!(State: ignore WpViewport);
 delegate_noop!(State: ignore ZxdgOutputManagerV1);
@@ -748,6 +914,34 @@ impl Dispatch<ZwlrLayerSurfaceV1, usize> for State {
     }
 }
 
+impl Dispatch<XdgWmBase, ()> for State {
+    fn event(_: &mut Self, wm: &XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<XdgSurface, usize> for State {
+    fn event(state: &mut Self, xs: &XdgSurface, event: xdg_surface::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            xs.ack_configure(serial);
+            if let Some(o) = state.overlays.get_mut(*i) {
+                o.configured = true;
+            }
+            state.input(Input::Repaint);
+        }
+    }
+}
+
+impl Dispatch<XdgToplevel, usize> for State {
+    fn event(state: &mut Self, _: &XdgToplevel, event: xdg_toplevel::Event, _: &usize, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_toplevel::Event::Close = event {
+            state.input(Input::Key { key: Key::Esc, shift: false, ctrl: false });
+        }
+    }
+}
+
 impl Dispatch<ZwlrScreencopyFrameV1, usize> for State {
     fn event(state: &mut Self, _: &ZwlrScreencopyFrameV1, event: zwlr_screencopy_frame_v1::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
         let Some(c) = state.copies.get_mut(*i) else { return };
@@ -783,7 +977,8 @@ impl Dispatch<WlPointer, ()> for State {
             }
             wl_pointer::Event::Leave { .. } => state.pointer_on = None,
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => state.moved(surface_x, surface_y),
-            wl_pointer::Event::Button { button, state: WEnum::Value(bs), .. } => {
+            wl_pointer::Event::Button { serial, button, state: WEnum::Value(bs), .. } => {
+                state.input_serial = serial;
                 let p = state.last_move();
                 let pressed = bs == wl_pointer::ButtonState::Pressed;
                 match (button, pressed) {
@@ -850,7 +1045,8 @@ impl Dispatch<WlKeyboard, ()> for State {
                     state.input(Input::Shift(shift));
                 }
             }
-            wl_keyboard::Event::Key { key, state: WEnum::Value(wl_keyboard::KeyState::Pressed), .. } => {
+            wl_keyboard::Event::Key { serial, key, state: WEnum::Value(wl_keyboard::KeyState::Pressed), .. } => {
+                state.input_serial = serial;
                 let Some(table) = &state.lookup else { return };
                 let kc = Keycode::from_evdev(key);
                 let (dep, lat, lck, group) = state.mods;
@@ -909,42 +1105,96 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for State {
     ]);
 }
 
+impl State {
+    /// Кто-то просит содержимое буфера. Wayland не говорит, кто и зажат ли Ctrl. Менеджеры
+    /// буфера реагируют на смену буфера мгновенно — им не отдаём; вставка человеком — позже.
+    fn send_clip(&mut self, mime: &str, fd: OwnedFd) {
+        let c = &mut self.clip;
+        let mut f = std::fs::File::from(fd);
+        if mime == "x-kde-passwordManagerHint" {
+            let _ = f.write_all(b"secret");
+            return;
+        }
+        if mime != "image/png" || c.image.is_none() {
+            return;
+        }
+        if c.set_at.elapsed() < WATCHER_WINDOW {
+            eprintln!("zyrik: буфер: запрос сразу после копирования — менеджеру буфера не отдаём");
+            return;
+        }
+        if c.png.is_none() {
+            c.png = c.image.as_ref().map(encode_png);
+        }
+        if let Some(png) = &c.png {
+            let _ = f.write_all(png);
+        }
+        c.clear_at = Some(Instant::now() + CLEAR_AFTER);
+    }
+
+    /// Кто-то положил в буфер своё — наш снимок больше не нужен.
+    fn clip_cancelled(&mut self, src: Source) {
+        src.destroy();
+        if self.clip.source.as_ref() == Some(&src) {
+            self.clip.source = None;
+            wipe(&mut self.clip);
+        }
+    }
+}
+
 impl Dispatch<ZwlrDataControlSourceV1, ()> for State {
     fn event(state: &mut Self, src: &ZwlrDataControlSourceV1, event: zwlr_data_control_source_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
-        let c = &mut state.clip;
         match event {
-            zwlr_data_control_source_v1::Event::Send { mime_type, fd } => {
-                let mut f = std::fs::File::from(fd);
-                if mime_type == "x-kde-passwordManagerHint" {
-                    let _ = f.write_all(b"secret");
-                    return;
-                }
-                if mime_type != "image/png" || c.image.is_none() {
-                    return;
-                }
-                // Wayland не говорит, кто просит и зажат ли Ctrl. Менеджеры буфера реагируют на
-                // смену буфера мгновенно — им не отдаём; вставка человеком — позже.
-                if c.set_at.elapsed() < WATCHER_WINDOW {
-                    eprintln!("zyrik: буфер: запрос сразу после копирования — менеджеру буфера не отдаём");
-                    return;
-                }
-                if c.png.is_none() {
-                    c.png = c.image.as_ref().map(encode_png);
-                }
-                if let Some(png) = &c.png {
-                    let _ = f.write_all(png);
-                }
-                c.clear_at = Some(Instant::now() + CLEAR_AFTER);
-            }
-            zwlr_data_control_source_v1::Event::Cancelled => {
-                // кто-то положил в буфер своё
-                src.destroy();
-                if c.source.as_ref() == Some(src) {
-                    c.source = None;
-                    wipe(c);
-                }
-            }
+            zwlr_data_control_source_v1::Event::Send { mime_type, fd } => state.send_clip(&mime_type, fd),
+            zwlr_data_control_source_v1::Event::Cancelled => state.clip_cancelled(Source::Wlr(src.clone())),
             _ => {}
         }
     }
+}
+
+impl Dispatch<ExtDataControlSourceV1, ()> for State {
+    fn event(state: &mut Self, src: &ExtDataControlSourceV1, event: ext_data_control_source_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            ext_data_control_source_v1::Event::Send { mime_type, fd } => state.send_clip(&mime_type, fd),
+            ext_data_control_source_v1::Event::Cancelled => state.clip_cancelled(Source::Ext(src.clone())),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlDataSource, ()> for State {
+    fn event(state: &mut Self, src: &WlDataSource, event: wl_data_source::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            wl_data_source::Event::Send { mime_type, fd } => state.send_clip(&mime_type, fd),
+            wl_data_source::Event::Cancelled => state.clip_cancelled(Source::Core(src.clone())),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ExtDataControlDeviceV1, ()> for State {
+    fn event(_: &mut Self, _: &ExtDataControlDeviceV1, event: ext_data_control_device_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            ext_data_control_device_v1::Event::DataOffer { id } => id.destroy(),
+            ext_data_control_device_v1::Event::Selection { id: Some(o) } | ext_data_control_device_v1::Event::PrimarySelection { id: Some(o) } => o.destroy(),
+            _ => {}
+        }
+    }
+
+    event_created_child!(State, ExtDataControlDeviceV1, [
+        ext_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ExtDataControlOfferV1, ()),
+    ]);
+}
+
+impl Dispatch<WlDataDevice, ()> for State {
+    fn event(_: &mut Self, _: &WlDataDevice, event: wl_data_device::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            wl_data_device::Event::DataOffer { id } => id.destroy(),
+            wl_data_device::Event::Selection { id: Some(o) } => o.destroy(),
+            _ => {}
+        }
+    }
+
+    event_created_child!(State, WlDataDevice, [
+        wl_data_device::EVT_DATA_OFFER_OPCODE => (WlDataOffer, ()),
+    ]);
 }

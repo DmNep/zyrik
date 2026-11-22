@@ -171,11 +171,20 @@
 
 ## Фаза 5 — Wayland · И1–И3, И7, И8
 
-- [ ] T052 `src/linux/wayland.rs`: окно на каждый монитор (layer-shell, где есть; иначе полноэкранное), `wl_shm`, ввод.
-- [ ] T053 Захват по итогам T004: `wlr-screencopy` → ScreenCast+PipeWire → (крайний случай) портал Screenshot с немедленным удалением файла и предупреждением.
-- [ ] T054 Горячая клавиша по итогам T003: GlobalShortcuts или `--trigger` из конфига композитора.
-- [ ] T055 Буфер: `wl_data_device` + хинт `x-kde-passwordManagerHint`.
-- [ ] T056 Таблица «композитор → как работает» для README.
+- [x] T052 `src/linux/wayland.rs`: окно на каждый монитор (layer-shell, где есть; иначе полноэкранное), `wl_shm`, ввод.
+- [x] T053 Захват по итогам T004: `wlr-screencopy` → ScreenCast+PipeWire → (крайний случай) портал Screenshot с немедленным удалением файла и предупреждением.
+- [x] T054 Горячая клавиша по итогам T003: GlobalShortcuts или `--trigger` из конфига композитора.
+- [x] T055 Буфер: `wl_data_device` + хинт `x-kde-passwordManagerHint`.
+- [x] T056 Таблица «композитор → как работает» для README.
+
+*Итог (2026-11-22):* Wayland — свой код на `wayland-client` (чистый Rust), раскладки `kbvm`.
+- Захват: `wlr-screencopy` в memfd (wlroots); KDE — `org.kde.KWin.ScreenShot2` в трубу, без файла (нужен `.desktop` с `X-KDE-DBUS-Restricted-Interfaces`); иначе портал Screenshot — файл читается, затирается и удаляется (`src/linux/{kwin,portal}.rs`).
+- Окно: `wlr-layer-shell` (Sway, Hyprland, KWin); GNOME — полноэкранное `xdg_toplevel`. `wp_viewporter` для HiDPI, `cursor-shape` для курсоров. Мышь и клавиатура — по `capabilities` сиденья (могут появиться позже).
+- Буфер: `ext-data-control` (KWin 6) → `wlr-data-control` → `wl_data_device` (GNOME; тогда ядро кладёт снимок в буфер до того, как спрятать окно — `Platform::clipboard_needs_focus`). Одноразовость по времени: запросы в первые 0,3 с — менеджерам буфера, не отдаём; через 1,5 с после вставки — очистка.
+- Клавиша: `zyrik --trigger` → абстрактный сокет `zyrik-<uid>`, проверка `SO_PEERCRED` (`src/linux/instance.rs`). Портал GlobalShortcuts не делали: бинд на команду работает везде.
+- Проверки: Sway 1.9 в Docker и CI (`tools/wayland-test/`, ввод — wtype и своя виртуальная мышь `examples/wl_mouse.rs`) — снимок, бинд, пометки, кириллица, буфер, Ctrl+S, выбор папки, strace: запись только снимков, соединения AF_UNIX. KDE Plasma 6.8 и GNOME Mutter 51 в Docker (`tools/wayland-desktops/`, ввод — `examples/kwin_input.rs` и `examples/mutter_input.rs`) — окно, мышь, клавиши, буфер, Ctrl+S; кадр подставляется из файла (только отладочная сборка), потому что снимок экрана там без GPU не снять.
+- Найдено: Wayland требует запрашивать мышь и клавиатуру только после `capabilities`; Mutter сразу читает новый буфер своим менеджером — получает пустоту, его копия пустая; KWin `--virtual` падает в ScreenShot2 без GPU.
+- Не проверено вживую: снимок экрана на KDE и GNOME, Hyprland, HiDPI и несколько мониторов на Wayland, повтор клавиш при удержании (не сделан).
 
 **Контрольная точка 5**: Sway, Hyprland, KDE Wayland — истории 1–3; GNOME — насколько позволяет, ограничения записаны.
 

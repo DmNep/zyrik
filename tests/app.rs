@@ -30,6 +30,8 @@ struct Fake {
     /// что легло в буфер: размер и пиксели
     clipboard: Option<(u32, u32, Vec<u32>)>,
     pictures: Option<PathBuf>,
+    /// Wayland без data-control: буфер — пока окно выделения ещё показано
+    needs_focus: bool,
 }
 
 /// Кадр 400×300 в координатах ОС (-100, 0): у каждого пикселя своё значение.
@@ -92,9 +94,16 @@ impl Platform for Fake {
         self.overlay = None;
     }
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem> {
-        assert!(self.overlay.is_none(), "буфер — уже после того, как окно спрятано");
+        if self.needs_focus {
+            assert!(self.overlay.is_some(), "без data-control буфер — пока окно в фокусе");
+        } else {
+            assert!(self.overlay.is_none(), "буфер — уже после того, как окно спрятано");
+        }
         self.clipboard = Some((image.width(), image.height(), image.pixels().to_vec()));
         Ok(())
+    }
+    fn clipboard_needs_focus(&self) -> bool {
+        self.needs_focus
     }
     fn places(&self) -> Vec<Place> {
         self.pictures.iter().map(|p| Place { kind: PlaceKind::Pictures, path: p.clone() }).collect()
@@ -424,4 +433,13 @@ fn floppy_picker_choice_becomes_last_folder() {
     assert!(chosen.join("Зырик_2026-11-21_09-05-07_2.png").exists(), "Ctrl+S — туда же, без перезаписи");
     assert_eq!(std::fs::read_dir(&first).unwrap().count(), 1, "в «Изображениях» только папка «Снимки»");
     std::fs::remove_dir_all(&first).unwrap();
+}
+
+#[test]
+fn clipboard_before_hiding_when_platform_needs_focus() {
+    let mut fake = Fake { needs_focus: true, ..Fake::default() };
+    fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    assert_eq!(f.clipboard.as_ref().map(|c| (c.0, c.1)), Some((100, 50)));
+    assert_eq!(f.overlay, None, "окно всё равно спрятано");
 }
