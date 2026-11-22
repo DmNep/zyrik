@@ -4,7 +4,7 @@
 #   ZYRIK_OCR_LIB=… bash tools/ocr-no-disk.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(cargo test --release --locked --features ocr --test ocr --no-run 2>&1 | sed -n 's/.*Executable tests\/ocr.rs (\(.*\))/\1/p')
+bin=$(cargo test --release --locked --features ocr --test ocr --no-run --color never 2>&1 | sed -n 's/.*Executable tests\/ocr.rs (\(.*\))/\1/p')
 [ -x "$bin" ] || { echo "не нашёл тест распознавания"; exit 1; }
 log=$(mktemp)
 strace -f -qq -e trace=%file,%network -o "$log" "$bin" --test-threads=1
