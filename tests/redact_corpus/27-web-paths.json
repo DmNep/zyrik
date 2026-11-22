@@ -1,0 +1,38 @@
+{
+ "source": "Chromium, 14px 'Liberation Sans', фон #1f1f1f",
+ "items": [
+  {
+   "category": "UserPath",
+   "rects": [
+    [
+     217,
+     82,
+     112,
+     14
+    ]
+   ]
+  },
+  {
+   "category": "UserPath",
+   "rects": [
+    [
+     190,
+     103,
+     161,
+     11
+    ]
+   ]
+  },
+  {
+   "category": "Host",
+   "rects": [
+    [
+     115,
+     124,
+     71,
+     14
+    ]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,49 @@
+{
+ "source": "Chromium, 16px 'Noto Sans', фон #f6f8fa",
+ "items": [
+  {
+   "category": "Name",
+   "rects": [
+    [
+     255,
+     94,
+     222,
+     16
+    ]
+   ]
+  },
+  {
+   "category": "Passport",
+   "rects": [
+    [
+     372,
+     122,
+     88,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "BankAccount",
+   "rects": [
+    [
+     252,
+     150,
+     172,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "Inn",
+   "rects": [
+    [
+     254,
+     178,
+     106,
+     12
+    ]
+   ]
+  }
+ ]
+}

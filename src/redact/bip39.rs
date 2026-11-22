@@ -22,6 +22,11 @@ pub fn is_word(w: &str) -> bool {
 /// Слово без знаков по краям, в нижнем регистре; номер вида «1.», «12)» → `None` (пропустить).
 fn clean(w: &str) -> Option<Option<String>> {
     let t: String = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    // распознавание склеивает номер со словом: «1.now», «4,sell»
+    let t = match t.find(|c: char| !c.is_ascii_digit()) {
+        Some(i) if i > 0 && t[i..].starts_with(['.', ',', ')']) => t[i + 1..].trim_start().to_string(),
+        _ => t,
+    };
     if t.is_empty() || t.chars().all(|c| c.is_ascii_digit()) {
         return Some(None); // номер или знак — пропускаем, фразу не рвём
     }

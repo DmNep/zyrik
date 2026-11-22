@@ -1,0 +1,49 @@
+{
+ "source": "xterm, DejaVu Sans Mono 13px, фон #002b36",
+ "items": [
+  {
+   "category": "Mac",
+   "rects": [
+    [
+     175,
+     55,
+     183,
+     14
+    ]
+   ]
+  },
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     110,
+     78,
+     149,
+     13
+    ]
+   ]
+  },
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     352,
+     78,
+     105,
+     13
+    ]
+   ]
+  },
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     120,
+     99,
+     272,
+     14
+    ]
+   ]
+  }
+ ]
+}

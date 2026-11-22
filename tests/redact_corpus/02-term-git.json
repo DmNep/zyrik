@@ -1,0 +1,16 @@
+{
+ "source": "xterm, Liberation Mono 14px, фон #ffffff",
+ "items": [
+  {
+   "category": "UrlCredentials",
+   "rects": [
+    [
+     586,
+     10,
+     236,
+     19
+    ]
+   ]
+  }
+ ]
+}

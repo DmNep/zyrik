@@ -1,0 +1,38 @@
+{
+ "source": "Chromium, 16px 'Noto Sans', фон #ffffff",
+ "items": [
+  {
+   "category": "Wallet",
+   "rects": [
+    [
+     252,
+     94,
+     369,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "Wallet",
+   "rects": [
+    [
+     262,
+     122,
+     307,
+     16
+    ]
+   ]
+  },
+  {
+   "category": "CryptoKey",
+   "rects": [
+    [
+     253,
+     150,
+     492,
+     16
+    ]
+   ]
+  }
+ ]
+}

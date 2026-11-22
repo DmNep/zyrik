@@ -1,0 +1,38 @@
+{
+ "source": "Chromium, 13px 'DejaVu Sans', фон #1f1f1f",
+ "items": [
+  {
+   "category": "Password",
+   "rects": [
+    [
+     304,
+     110,
+     56,
+     10
+    ]
+   ]
+  },
+  {
+   "category": "Card",
+   "rects": [
+    [
+     240,
+     193,
+     134,
+     9
+    ]
+   ]
+  },
+  {
+   "category": "Phone",
+   "rects": [
+    [
+     164,
+     234,
+     122,
+     9
+    ]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,49 @@
+{
+ "source": "xterm, DejaVu Sans Mono 13px, фон #1e1e1e",
+ "items": [
+  {
+   "category": "Token",
+   "rects": [
+    [
+     207,
+     34,
+     217,
+     13
+    ]
+   ]
+  },
+  {
+   "category": "Token",
+   "rects": [
+    [
+     153,
+     55,
+     430,
+     18
+    ]
+   ]
+  },
+  {
+   "category": "Password",
+   "rects": [
+    [
+     141,
+     77,
+     151,
+     18
+    ]
+   ]
+  },
+  {
+   "category": "Token",
+   "rects": [
+    [
+     187,
+     99,
+     611,
+     18
+    ]
+   ]
+  }
+ ]
+}

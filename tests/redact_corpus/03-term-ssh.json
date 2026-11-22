@@ -1,0 +1,38 @@
+{
+ "source": "xterm, Noto Mono 12px, фон #002b36",
+ "items": [
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     303,
+     12,
+     133,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "UserPath",
+   "rects": [
+    [
+     481,
+     11,
+     146,
+     13
+    ]
+   ]
+  },
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     433,
+     54,
+     123,
+     12
+    ]
+   ]
+  }
+ ]
+}

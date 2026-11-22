@@ -1,0 +1,60 @@
+{
+ "source": "Chromium, 15px 'DejaVu Sans', фон #ffffff",
+ "items": [
+  {
+   "category": "Name",
+   "rects": [
+    [
+     252,
+     86,
+     217,
+     15
+    ]
+   ]
+  },
+  {
+   "category": "Email",
+   "rects": [
+    [
+     254,
+     113,
+     223,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "Phone",
+   "rects": [
+    [
+     253,
+     134,
+     141,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "Snils",
+   "rects": [
+    [
+     253,
+     158,
+     117,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "Inn",
+   "rects": [
+    [
+     253,
+     182,
+     111,
+     12
+    ]
+   ]
+  }
+ ]
+}

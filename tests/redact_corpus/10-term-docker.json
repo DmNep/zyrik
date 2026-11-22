@@ -1,0 +1,16 @@
+{
+ "source": "xterm, Liberation Mono 11px, фон #1e1e1e",
+ "items": [
+  {
+   "category": "Password",
+   "rects": [
+    [
+     379,
+     11,
+     158,
+     10
+    ]
+   ]
+  }
+ ]
+}

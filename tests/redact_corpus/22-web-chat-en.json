@@ -1,0 +1,38 @@
+{
+ "source": "Chromium, 15px 'DejaVu Sans', фон #f6f8fa",
+ "items": [
+  {
+   "category": "Ip",
+   "rects": [
+    [
+     141,
+     70,
+     115,
+     12
+    ]
+   ]
+  },
+  {
+   "category": "UrlCredentials",
+   "rects": [
+    [
+     46,
+     132,
+     411,
+     15
+    ]
+   ]
+  },
+  {
+   "category": "Token",
+   "rects": [
+    [
+     40,
+     194,
+     272,
+     12
+    ]
+   ]
+  }
+ ]
+}

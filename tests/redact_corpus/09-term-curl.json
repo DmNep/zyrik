@@ -1,0 +1,27 @@
+{
+ "source": "xterm, DejaVu Sans Mono 16px, фон #002b36",
+ "items": [
+  {
+   "category": "Token",
+   "rects": [
+    [
+     674,
+     11,
+     516,
+     23
+    ]
+   ]
+  },
+  {
+   "category": "Email",
+   "rects": [
+    [
+     310,
+     38,
+     372,
+     23
+    ]
+   ]
+  }
+ ]
+}

@@ -162,8 +162,16 @@ pub(crate) fn union(a: Rect, b: Rect) -> Rect {
     Rect { x: l, y: t, w: r - l, h: btm - t }
 }
 
+/// Одно и то же место: пересечение больше половины меньшей из рамок (а не касание: рамки
+/// соседних строк с отступами задевают друг друга на пиксель).
 fn overlaps(a: Rect, b: Rect) -> bool {
-    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+    let w = a.right().min(b.right()) - a.x.max(b.x);
+    let h = a.bottom().min(b.bottom()) - a.y.max(b.y);
+    if w <= 0 || h <= 0 {
+        return false;
+    }
+    let smaller = (a.w * a.h).min(b.w * b.h).max(1);
+    2 * w * h > smaller
 }
 
 /// Отступ вокруг рамки, чтобы закраска накрывала буквы целиком (выносные элементы, сглаживание).

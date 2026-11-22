@@ -226,3 +226,22 @@ fn main() { }");
     assert_eq!(seed.len(), 1, "{f:?}");
     assert_eq!(seed[0].rects.len(), 2, "две строки фразы");
 }
+
+#[test]
+fn email_next_to_a_long_line_above_is_kept() {
+    // рамка токена строкой выше с отступом задевает строку с почтой — это не повтор
+    let t = "curl -H Authorization: Bearer abcDEF123ghiJKL456mnoPQR789stuVWX0 https://api.example.com/v1/me\n{\"email\": \"smirnova.upd@corp.example.net\", \"plan\": \"pro\"}";
+    let c = cats(t);
+    assert!(c.contains(&Category::Email) && c.contains(&Category::Token), "{c:?}");
+}
+
+#[test]
+fn ocr_broken_values_are_still_found() {
+    one("DB_URL=postgres: //app: QakSVPhHDJsW@db. internal :5432/app", Category::UrlCredentials);
+    one("key sk live 4If58KdTSBI8xS6xU2Uk46UA", Category::Token);
+    one("SLACK_BOT_TOKEN=xoxb - 926937195562 - 7995560636224 - AgsXOhy LOF6sn23DSp8kVzjl", Category::Token);
+    one("sssh-ed25519 AAAAC3NZaC11ZDIANTESAAAATK8Qc V88xVzvL gkGoy6/LmMrBw user@laptop", Category::SshKey);
+    one("Aapec ETH Oxba8b4b8aeccf7a8e381 fb6d82cd07a079acf1 bed", Category::Wallet);
+    one("docker login -u robot -p 1XGxr6FWROIDTMywhI registry.example.com", Category::Password);
+    assert!(find("docker run -p 8080:80 nginx").is_empty(), "проброс порта — не пароль");
+}

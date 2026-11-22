@@ -1,0 +1,38 @@
+{
+ "source": "Chromium, 14px 'Liberation Sans', фон #ffffff",
+ "items": [
+  {
+   "category": "Password",
+   "rects": [
+    [
+     139,
+     124,
+     267,
+     14
+    ]
+   ]
+  },
+  {
+   "category": "UrlCredentials",
+   "rects": [
+    [
+     156,
+     145,
+     402,
+     14
+    ]
+   ]
+  },
+  {
+   "category": "Token",
+   "rects": [
+    [
+     183,
+     166,
+     387,
+     14
+    ]
+   ]
+  }
+ ]
+}

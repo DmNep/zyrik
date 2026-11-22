@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::validators::{base58check, bech32, entropy, inn, luhn, snils};
+use super::validators::{base58check, entropy, inn, luhn, snils};
 use super::{Category, Finding, Line};
 
 struct Rule {
@@ -30,6 +30,23 @@ fn is_ipv6(s: &str) -> bool {
         && s.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
+/// Значение флага `-p`/`--password` похоже на пароль: буквы и цифры, от 6 знаков
+/// (так `-p 8080:80` у docker паролем не считается).
+fn passwordish(s: &str) -> bool {
+    s.len() >= 6 && s.chars().any(|c| c.is_ascii_alphabetic()) && s.chars().any(|c| c.is_ascii_digit()) && !s.contains(':')
+}
+
+/// Ровно 40 hex-знаков (распознавание вставляет пробелы).
+fn hex40(s: &str) -> bool {
+    s.chars().skip(2).filter(char::is_ascii_hexdigit).count() == 40
+}
+
+/// Случайная строка, которую распознавание могло разорвать пробелами: проверяем склеенную.
+fn high_entropy_joined(s: &str) -> bool {
+    let joined: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    joined.len() >= 24 && high_entropy(&joined)
+}
+
 fn wallet_base58(s: &str) -> bool {
     base58check(s)
 }
@@ -46,20 +63,25 @@ fn rules() -> &'static [Rule] {
         use Category::*;
         vec![
             // --- ключи и учётные данные
-            rule(SshKey, r"\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d+|sk-ssh-ed25519@openssh\.com)\s+AAAA[0-9A-Za-z+/=]{12,}", 0, None),
-            rule(Token, r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[abposr]-[0-9A-Za-z-]{10,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|[sr]k_(?:live|test)_[0-9A-Za-z]{16,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})", 0, None),
+            // распознавание путает начало («sssh-») и разрывает base64 пробелами
+            rule(SshKey, r"\S*(?:sh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d+)\s+AAAA[0-9A-Za-z+/=]{6,}(?:\s[0-9A-Za-z+/=]{4,})*", 0, None),
+            rule(Token, r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[abposr]\s?-\s?(?:[0-9A-Za-z]+\s?-\s?){2,}[0-9A-Za-z]{6,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|[sr]k[_ ](?:live|test)[_ ][0-9A-Za-z]{16,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})", 0, None),
             rule(Token, r"(?i)\bBearer\s+([A-Za-z0-9._~+/-]{16,}=*)", 1, None),
-            rule(UrlCredentials, r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:([^\s@/]+)@[^\s/]+", 0, None),
+            // распознавание вставляет пробелы: «postgres: //app: пароль@db. internal :5432/app»
+            rule(UrlCredentials, r"\b[a-zA-Z][a-zA-Z0-9+.-]*:\s?//\s?[^\s:/@]+:\s?[^\s@/]+@[^\s/]+(?:\s?[.:]\s?[^\s/]+)*(?:/\S*)?", 0, None),
             rule(ConnectionString, r"(?i)\bSrvr\s*=.*(?:Usr|Pwd)\s*=[^;\s]*", 0, None),
             rule(Password, r"(?i)(?:^|[\s;,{(]|\b)(?:password|passwd|pwd|pass|secret|token|api[_-]?key|access[_-]?key|пароль|ключ)[\w-]{0,20}\s*[:=]\s*(\S+)", 1, None),
-            rule(Password, r"\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*(\S+)", 1, None),
+            // переменная окружения с секретом: значение до конца строки (распознавание рвёт его пробелами)
+            rule(Password, r"\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*(\S.*?)\s*$", 1, None),
+            rule(Password, r"(?:^|\s)(?:-p|--password(?:=|\s))\s*(\S+)", 1, Some(passwordish)),
             // --- криптокошельки
             rule(CryptoKey, r"\b[xyzt]prv[1-9A-HJ-NP-Za-km-z]{100,112}\b", 0, Some(base58check)),
             rule(CryptoKey, r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b", 0, Some(base58check)),
             rule(CryptoKey, r"\b(?:0x)?[0-9a-fA-F]{64}\b", 0, None),
             // контрольную сумму EIP-55 не требуем: распознавание путает регистр, а пропуск хуже
-            rule(Wallet, r"\b0[xX][0-9a-fA-F]{40}\b", 0, None),
-            rule(Wallet, r"\b(?:bc|tb|ltc)1[02-9ac-hj-np-zAC-HJ-NP-Z]{8,87}\b", 0, Some(bech32)),
+            rule(Wallet, r"\b[0O][xX](?:\s?[0-9a-fA-F]){40}\b", 0, Some(hex40)),
+            // контрольную сумму Bech32 не требуем: одна ошибка распознавания её ломает
+            rule(Wallet, r"\b(?:bc|tb|ltc)1(?:\s?[0-9a-zA-Z]){25,87}\b", 0, None),
             rule(Wallet, r"\b[13][1-9A-HJ-NP-Za-km-z]{25,34}\b", 0, Some(wallet_base58)),
             // --- личное
             rule(Email, r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b", 0, None),
@@ -84,6 +106,7 @@ fn rules() -> &'static [Rule] {
             rule(Host, r"(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:local|lan|corp|internal|intranet|home\.arpa)\b", 0, None),
             // --- длинные случайные строки, не попавшие в шаблоны выше
             rule(RandomSecret, r"[A-Za-z0-9+/=_-]{24,}", 0, Some(high_entropy)),
+            rule(RandomSecret, r"[A-Za-z0-9+/=_{}\\-]{6,}(?:\s[A-Za-z0-9+/=_{}\\-]{4,}){1,4}", 0, Some(high_entropy_joined)),
         ]
     })
 }
