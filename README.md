@@ -38,7 +38,7 @@ PNG сохраняется без метаданных: в файле тольк
 
 После горячей клавиши экран замирает. Дальше:
 
-- Мышью выделить зону. Тянуть за край или угол — менять размер, за середину — двигать. Стрелки двигают зону, `Shift`+стрелки — на 10 пикселей, `Ctrl`+стрелки меняют размер.
+- Мышью выделить зону. Пока зоны нет, окно под курсором подсвечено: щелчок выбирает окно целиком (на Wayland окна программам не видны — только протянуть). Тянуть за край или угол — менять размер, за середину — двигать. Стрелки двигают зону, `Shift`+стрелки — на 10 пикселей, `Ctrl`+стрелки меняют размер.
 - Под зоной появляется панель: карандаш `P`, линия `L`, стрелка `A`, прямоугольник `R`, подпись `T`, цвет красный или синий `C`. С `Shift` линии ложатся ровно под 0, 45 и 90°, прямоугольник становится квадратом. Колёсико меняет толщину или размер подписи.
 - `Ctrl+Z` — отменить, `Ctrl+Y` или `Ctrl+Shift+Z` — вернуть.
 - Закраска `B`: выделите прямоугольник — он заливается сплошным чёрным прямо в пикселях снимка, восстановить исходное нельзя (не размытие и не пикселизация).
@@ -57,7 +57,10 @@ PNG сохраняется без метаданных: в файле тольк
 Настройки нигде не хранятся: их пишут в ярлык. `zyrik --help` печатает полную справку с путём к запущенному файлу.
 
 - `--key <клавиши>` — горячая клавиша. По умолчанию `Ctrl+PrtScr`, на Маке `Cmd+Shift+2`. Например `--key Shift+PrtScr` или `--key Ctrl+Alt+F12`.
+- `--key-screen <клавиши>` — клавиша «весь монитор»: сразу выбран монитор под курсором, остаётся нажать `Enter` или порисовать. По умолчанию не назначена.
+- `--key-window <клавиши>` — клавиша «активное окно»: сразу выбрано окно, в котором вы работали (по видимой рамке, без тени). Если окно узнать нельзя (Wayland), открывается обычное выделение.
 - `--save-dir <папка>` — куда сохранять по `Ctrl+S`.
+- `--clear-clipboard <мин>` — если снимок так и не вставили, через столько минут (от 1 до 1440) убрать его из буфера. Чужое содержимое не трогается: Зырик проверяет только, что владелец буфера всё ещё он, сам буфер не читает.
 - `--no-detect` — не искать приватное (ручная закраска остаётся).
 - `--lang ru|en` — язык. По умолчанию — язык системы, иначе английский.
 
@@ -85,7 +88,7 @@ PNG сохраняется без метаданных: в файле тольк
 
 ### Wayland
 
-Wayland не даёт программам глобальных клавиш: клавишу задают в настройках рабочего стола или композитора на команду `zyrik --trigger`. Она только просит уже запущенный Зырик зырнуть (через местный сокет, команды принимаются только от того же пользователя).
+Wayland не даёт программам глобальных клавиш: клавишу задают в настройках рабочего стола или композитора на команду `zyrik --trigger`. Она только просит уже запущенный Зырик зырнуть (через местный сокет, команды принимаются только от того же пользователя). `zyrik --trigger screen` — сразу весь монитор (на Wayland — первый: где курсор, программам не сообщают), `zyrik --trigger window` — то же, что обычное выделение: окна на Wayland программам не видны.
 
 | Рабочий стол | Снимок экрана | Окно выделения | Буфер | Клавиша |
 |---|---|---|---|---|
@@ -120,6 +123,14 @@ NoDisplay=true
 Подпись временная (ad-hoc), без сертификата Apple. При первом открытии macOS может отказаться запускать программу. Тогда откройте её правой кнопкой → «Открыть» или подтвердите в «Системные настройки → Конфиденциальность и безопасность».
 
 При первом снимке macOS спросит разрешение «Запись экрана и системного звука». Включите Зырик и запустите его снова. После обновления на новую версию разрешение придётся выдать заново: оно привязано к подписи.
+
+Параметры на Маке передаются при запуске из Терминала:
+
+```
+open -a Зырик --args --key-screen Cmd+Shift+3 --clear-clipboard 5
+```
+
+Чтобы они действовали при входе в систему, сохраните эту строку в «Редакторе скриптов» как программу и добавьте её в «Системные настройки → Основные → Объекты входа» вместо самого Зырика.
 
 ## Что ищется
 
@@ -164,20 +175,20 @@ cargo build --release --features ocr
 | `specs/001-core-capture/plan.md` | Как делаем: стек, архитектура, решения |
 | `specs/001-core-capture/tasks.md` | Задачи по фазам с итогами проверок |
 
-Сделано: захват области, пометки, буфер, сохранение на Windows, Linux (X11 и Wayland) и macOS. Сделаны и поиск с закраской приватного. Дальше: снимок всего экрана и окна, задержка перед снимком.
+Сделано всё из спецификации: захват области, монитора и окна, пометки, одноразовый буфер, сохранение, поиск и закраска приватного — на Windows, Linux (X11 и Wayland) и macOS. Итоги проверки по каждому критерию — в `specs/001-core-capture/checklist.md`.
 
 ## Ограничения
 
 - Wayland: горячую клавишу задают в настройках рабочего стола на `zyrik --trigger`; в GNOME снимок на мгновение оказывается в файле (портал), Зырик сразу его затирает и удаляет. Снимок экрана на KDE и GNOME, а также Hyprland проверены не вживую.
 - Wayland: буфер очищается через 1,5 с после вставки, а не по отпусканию Ctrl.
 - Распознавание ошибается на мелком и декоративном тексте, на тексте с подчёркиваниями проверки орфографии; ФИО ищутся только по шаблонам. Смотрите глазами и закрашивайте вручную.
-- `--key-screen`, `--key-window` и `--clear-clipboard` уже принимаются, но пока не действуют: снимок экрана и окна и очистка буфера по таймеру — следующие этапы. Любая клавиша сейчас открывает выделение области.
+- Wayland: окна и курсор программам не видны, поэтому щелчка по окну и `--key-window` там нет, а «весь монитор» — первый монитор.
 - На Маке первый снимок после запуска появляется за 0,3–0,9 с, следующие — за 0,1–0,2 с.
 - Выбор папки показывает только папки; имя файла задаётся автоматически по дате и времени, новую папку из него не создать.
 
 ## English
 
-Zyrik is a screenshot tool for Windows, Linux (X11 and Wayland), and macOS that never leaks. Press `Ctrl+PrtScr` (`Cmd+Shift+2` on a Mac), select an area, optionally draw arrows, boxes, or captions, and press `Enter`: the shot goes to the clipboard as a one-time paste. It is handed out only to a paste with `Ctrl`/`Cmd` held, and the clipboard is cleared when the key is released; background clipboard readers get nothing, and the shot is marked to stay out of clipboard history and cloud sync. `Ctrl+S` saves a metadata-free PNG to the last folder (`--save-dir` or Pictures) without overwriting files; the floppy button opens Zyrik's own folder picker, because the Windows save dialog writes the program name and folder to the registry. Zyrik never opens a network connection, writes nothing to disk except the files you save, keeps no settings (use launch options, see `zyrik --help`), and wipes the shot from memory after paste or cancel. On Wayland, bind `zyrik --trigger` to a key in your compositor or desktop settings.
+Zyrik is a screenshot tool for Windows, Linux (X11 and Wayland), and macOS that never leaks. Press `Ctrl+PrtScr` (`Cmd+Shift+2` on a Mac), select an area, optionally draw arrows, boxes, or captions, and press `Enter`: the shot goes to the clipboard as a one-time paste. It is handed out only to a paste with `Ctrl`/`Cmd` held, and the clipboard is cleared when the key is released; background clipboard readers get nothing, and the shot is marked to stay out of clipboard history and cloud sync. `Ctrl+S` saves a metadata-free PNG to the last folder (`--save-dir` or Pictures) without overwriting files; the floppy button opens Zyrik's own folder picker, because the Windows save dialog writes the program name and folder to the registry. Zyrik never opens a network connection, writes nothing to disk except the files you save, keeps no settings (use launch options, see `zyrik --help`), and wipes the shot from memory after paste or cancel. Before you drag, the window under the cursor is highlighted and a click selects it; `--key-screen` and `--key-window` open with the monitor under the cursor or the active window already selected, and `--clear-clipboard <min>` drops an unpasted shot from the clipboard after that many minutes (only if the clipboard still holds it). On Wayland, bind `zyrik --trigger` (or `--trigger screen`) to a key in your compositor or desktop settings; windows and the cursor are not visible to apps there.
 
 ## License
 

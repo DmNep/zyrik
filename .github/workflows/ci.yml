@@ -101,7 +101,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build strace
+        run: sudo apt-get update && sudo apt-get install -y ninja-build strace xvfb
       - if: runner.os == 'macOS'
         run: brew install ninja
       - id: ocrkey
@@ -121,6 +121,10 @@ jobs:
         run: bash tools/ocr-no-disk.sh
       - run: cargo build --locked --release --features ocr --target ${{ matrix.target }}
       - run: ls -la target/${{ matrix.target }}/release/zyrik*
+      - name: SC-007 idle CPU and memory
+        run: |
+          exe=target/${{ matrix.target }}/release/zyrik
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a bash tools/idle.sh "$exe"; else bash tools/idle.sh "$exe"; fi
 
   offline:
     # Принцип I: в программе нет сети. Проверяем код и дерево зависимостей.
