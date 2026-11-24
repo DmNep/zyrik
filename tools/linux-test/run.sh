@@ -89,15 +89,6 @@ check '[ "$(ls "$shots/Снимки" | wc -l)" = 1 ]' "выбор папки: с
 shot; xdotool key ctrl+s; sleep 0.5
 check '[ "$(ls "$shots/Снимки" | wc -l)" = 2 ]' "следующий Ctrl+S — в выбранную папку"
 
-# 4. подпись по-русски: раскладка us,ru, вторая группа
-setxkbmap -layout us,ru 2>/dev/null
-shot; xdotool key t; xdotool mousemove 260 200 click 1; sleep 0.1
-xdotool key --clearmodifiers ISO_Next_Group 2>/dev/null
-xdotool type --delay 30 "Тест"; xdotool key Return; sleep 0.1
-xdotool key Escape; sleep 0.2
-check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "Esc закрыл выделение"
-setxkbmap -layout us 2>/dev/null
-
 # 5. правый щелчок без зоны — отмена
 shot; xdotool click 3; sleep 0.1; xdotool click 3; sleep 0.2
 check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "правая кнопка: сбросить зону, потом закрыть"
@@ -144,6 +135,15 @@ done
 sleep 0.3
 n=$(( $(grep -c "зырнул" /tmp/zyrik.log) - before ))
 check '[ "$n" = 100 ]' "SC-003: 100 снимков в буфер подряд ($n)"
+
+# 9. подпись по-русски (последней: xdotool после смены раскладки может слать клавиши чужими кодами): раскладка us,ru, вторая группа
+setxkbmap -layout us,ru 2>/dev/null
+shot; xdotool key t; xdotool mousemove 260 200 click 1; sleep 0.1
+xdotool key --clearmodifiers ISO_Next_Group 2>/dev/null
+xdotool type --delay 30 "Тест"; xdotool key Return; sleep 0.1
+xdotool key Escape; sleep 0.2
+check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "Esc закрыл выделение"
+setxkbmap -layout us 2>/dev/null
 
 pkill -x zyrik; wait $zpid 2>/dev/null
 
