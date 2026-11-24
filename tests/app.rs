@@ -546,12 +546,14 @@ fn clear_clipboard_is_scheduled_after_copy_only() {
     ]);
     let f = go(fake, &["--clear-clipboard", "5"]);
     assert!(f.clipboard.is_some());
-    assert_eq!(f.scheduled, [(Command::ClearClipboard, 5 * 60_000)]);
+    // с фичей ocr ядро ещё планирует свой Tick — смотрим только очистку
+    let clear: Vec<_> = f.scheduled.iter().filter(|(c, _)| *c == Command::ClearClipboard).collect();
+    assert_eq!(clear, [&(Command::ClearClipboard, 5 * 60_000)]);
     assert_eq!(f.cleared, 1);
 
     // без параметра — ничего не планируется
     let mut fake = Fake::default();
     fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), key(Key::Enter)]);
     let f = go(fake, &[]);
-    assert!(f.scheduled.is_empty());
+    assert!(f.scheduled.iter().all(|(c, _)| *c != Command::ClearClipboard));
 }

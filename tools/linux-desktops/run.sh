@@ -47,7 +47,7 @@ shot_png 0-desktop
 pgrep -l "plasmashell|xfce4-panel|gnome-shell" >/dev/null && ok "рабочий стол $de запущен" || bad "рабочий стол $de не запустился: $(tail -3 /tmp/shell.log)"
 
 shots=$(mktemp -d); mkdir "$shots/Снимки"
-"${ZYRIK:-/bin-zyrik/zyrik}" --lang ru --save-dir "$shots" 2>/tmp/z.log &
+"${ZYRIK:-/bin-zyrik/zyrik}" --lang ru --save-dir "$shots" --key-screen shift+F9 --key-window shift+F10 2>/tmp/z.log &
 zpid=$!
 sleep 4
 kill -0 $zpid 2>/dev/null && ok "Зырик работает" || bad "Зырик завершился: $(cat /tmp/z.log)"
@@ -117,6 +117,35 @@ xdotool mousemove $fx $fy click 1; sleep 0.5
 shot_png 4-picker
 xdotool key Return; sleep 0.2; xdotool key ctrl+s; sleep 0.6
 [ "$(ls "$shots/Снимки" | wc -l)" = 1 ] && ok "выбор папки: сохранено в «Снимки»" || bad "выбор папки: $(ls -R "$shots")"
+
+# --- история 5: активное окно, щелчок по окну, весь монитор (окна EWMH, рамка оконного менеджера)
+paste_size() {
+  xdotool keydown ctrl; sleep 0.05
+  xclip -selection clipboard -t image/png -o > /tmp/p.png 2>/dev/null
+  xdotool keyup ctrl; sleep 0.5
+  python3 -c "import struct;d=open('/tmp/p.png','rb').read();print(struct.unpack('>II',d[16:24]) if d[1:4]==b'PNG' else 'не PNG')"
+}
+xmessage -geometry 420x220+520+260 "окно для истории 5" &
+xm=$!; sleep 2
+wid=$(xdotool search --sync --onlyvisible --class xmessage | head -1)
+xdotool windowactivate --sync "$wid" 2>/dev/null; sleep 0.5
+# видимая рамка окна = клиент + рамка оконного менеджера (_NET_FRAME_EXTENTS: слева, справа, сверху, снизу)
+read cw ch < <(xwininfo -id "$wid" | awk '/Width:/{w=$2}/Height:/{h=$2}END{print w, h}')
+read el er et eb < <(xprop -id "$wid" _NET_FRAME_EXTENTS | sed 's/.*= //; s/,//g')
+frame="($((cw + ${el:-0} + ${er:-0})), $((ch + ${et:-0} + ${eb:-0})))"
+echo "окно xmessage с рамкой: $frame"
+xdotool key shift+F10; sleep 1; shot_png 5-active-window
+xdotool key Return; sleep 0.5
+size=$(paste_size)
+[ "$size" = "$frame" ] && ok "--key-window: выбрано активное окно с рамкой $size" || bad "--key-window: $size, а у окна $frame"
+start; xdotool mousemove 700 380; sleep 0.4; shot_png 6-window-hover
+xdotool click 1; sleep 0.3; xdotool key Return; sleep 0.5
+size=$(paste_size)
+[ "$size" = "$frame" ] && ok "щелчок по окну выбрал его ($size)" || bad "щелчок по окну: $size, а у окна $frame"
+xdotool key shift+F9; sleep 1; xdotool key Return; sleep 0.5
+size=$(paste_size)
+[ "$size" = "(1600, 900)" ] && ok "--key-screen: весь монитор ($size)" || bad "--key-screen: $size"
+kill $xm 2>/dev/null
 
 # --- пункт меню «Выход» через меню значка (dbusmenu)
 if [ -n "$dest" ]; then

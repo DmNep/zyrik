@@ -120,6 +120,16 @@ size=$(paste_size)
 check '[ "$size" = "(100, 60)" ]' "протягивание по окну — обычная зона ($size)"
 kill $xm 2>/dev/null
 
+# 8. SC-003: 100 снимков в буфер без Ctrl+S — под strace ни одного нового файла (проверка ниже)
+before=$(grep -c "зырнул" /tmp/zyrik.log)
+for i in $(seq 100); do
+  xdotool key ctrl+Print; sleep 0.25
+  xdotool mousemove 300 200 mousedown 1 mousemove 500 300 mouseup 1 key Return; sleep 0.1
+done
+sleep 0.3
+n=$(( $(grep -c "зырнул" /tmp/zyrik.log) - before ))
+check '[ "$n" = 100 ]' "SC-003: 100 снимков в буфер подряд ($n)"
+
 pkill -x zyrik; wait $zpid 2>/dev/null
 
 echo "== strace: что Зырик открывал на запись и куда подключался"

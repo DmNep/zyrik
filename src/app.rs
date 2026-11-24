@@ -11,7 +11,7 @@ use crate::i18n::{Lang, Msg};
 use crate::image::Image;
 use crate::picker::{self, PickOutcome, Picker, Status};
 use crate::platform::{Command, Frame, MenuItem, PlaceKind, Platform, Problem, Shot};
-use crate::session::{Cursor, Input, Outcome, Session};
+use crate::session::{Cursor, Input, Outcome, Rect, Session};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Задержка пункта «Зырнуть через 3 с»
@@ -356,16 +356,23 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot, detect: bool) -> Option
         }
     };
     let captured = t0.elapsed();
-    // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
     let (w, h) = (frame.image.width(), frame.image.height());
     let mut session = Session::with_monitors(w, h, frame.monitors.clone());
     session.set_windows(frame.desktop.windows.clone());
     // История 5: весь монитор под курсором или активное окно — сразу выбранной зоной
     match shot {
         Shot::Screen => {
-            let m = frame.desktop.cursor.and_then(|c| frame.monitors.iter().find(|m| m.rect.contains(c))).or(frame.monitors.first());
-            if let Some(m) = m {
-                session.select(m.rect);
+            let usable = |m: &&crate::platform::Monitor| m.rect.w > 0 && m.rect.h > 0;
+            let m = frame
+                .desktop
+                .cursor
+                .and_then(|c| frame.monitors.iter().filter(usable).find(|m| m.rect.contains(c)))
+                .or(frame.monitors.iter().find(usable));
+            p.debug_log(&format!("монитор: {:?}, курсор {:?}", m.map(|m| m.rect), frame.desktop.cursor));
+            session.select(m.map_or(Rect { x: 0, y: 0, w: w as i32, h: h as i32 }, |m| m.rect));
+            // монитор вне кадра (ОС сообщила странное) — тогда весь кадр
+            if session.selection().is_none() {
+                session.select(Rect { x: 0, y: 0, w: w as i32, h: h as i32 });
             }
         }
         Shot::Window => {
