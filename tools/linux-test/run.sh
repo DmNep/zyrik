@@ -32,6 +32,15 @@ sleep 1.5
 
 check '"$exe" --lang ru 2>&1 | grep -q "уже запущен"' "вторая копия не запускается"
 
+# дождаться, пока окно выделения появится / исчезнет (быстрые машины CI опережают фиксированные паузы)
+# окно видно раньше, чем оно забрало клавиатуру и мышь; готово — когда Зырик записал в журнал «выделение на экране»
+hot() {  # нажать клавишу Зырика и дождаться готового выделения
+  local n; n=$(grep -c "выделение на экране" /tmp/zyrik.log)
+  overlay_down; xdotool key "$1"
+  for _ in $(seq 40); do [ "$(grep -c "выделение на экране" /tmp/zyrik.log)" -gt "$n" ] && return 0; sleep 0.05; done; return 1
+}
+overlay_down() { for _ in $(seq 40); do xdotool search --onlyvisible --name "^Zyrik$" >/dev/null || return 0; sleep 0.05; done; return 1; }
+
 shot() {  # Ctrl+PrtScr и выделить (200,150)–(700,450)
   xdotool key ctrl+Print; sleep 0.4
   xdotool mousemove 200 150 mousedown 1 mousemove 450 300 mousemove 700 450 mouseup 1; sleep 0.2
@@ -87,6 +96,7 @@ xdotool key --clearmodifiers ISO_Next_Group 2>/dev/null
 xdotool type --delay 30 "Тест"; xdotool key Return; sleep 0.1
 xdotool key Escape; sleep 0.2
 check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "Esc закрыл выделение"
+setxkbmap -layout us 2>/dev/null
 
 # 5. правый щелчок без зоны — отмена
 shot; xdotool click 3; sleep 0.1; xdotool click 3; sleep 0.2
@@ -101,7 +111,7 @@ paste_size() {  # вставить «с Ctrl» и вернуть размер PN
 }
 
 # 6. история 5: --key-screen — весь монитор сразу выбран
-xdotool key ctrl+F9; sleep 0.4; xdotool key Return; sleep 0.3
+hot ctrl+F9; xdotool key Return; overlay_down
 size=$(paste_size)
 check '[ "$size" = "(1600, 900)" ]' "--key-screen: весь монитор ($size)"
 
@@ -109,12 +119,12 @@ check '[ "$size" = "(1600, 900)" ]' "--key-screen: весь монитор ($siz
 xmessage -geometry 320x180+900+120 "окно для щелчка" &
 xm=$!; sleep 0.8
 want=$(xwininfo -name xmessage | awk '/Width:/{w=$2}/Height:/{h=$2}END{print "(" w ", " h ")"}')
-xdotool key ctrl+Print; sleep 0.4
+hot ctrl+Print
 xdotool mousemove 1000 200; sleep 0.1; xdotool click 1; sleep 0.2; xdotool key Return; sleep 0.3
 size=$(paste_size)
 check '[ "$size" = "$want" ]' "щелчок по окну: выбрано окно ($size, у окна $want)"
 # протянуть по окну — всё равно обычная зона
-xdotool key ctrl+Print; sleep 0.4
+hot ctrl+Print
 xdotool mousemove 950 150 mousedown 1 mousemove 1000 180 mousemove 1050 210 mouseup 1; sleep 0.2; xdotool key Return; sleep 0.3
 size=$(paste_size)
 check '[ "$size" = "(100, 60)" ]' "протягивание по окну — обычная зона ($size)"
@@ -123,8 +133,8 @@ kill $xm 2>/dev/null
 # 8. SC-003: 100 снимков в буфер без Ctrl+S — под strace ни одного нового файла (проверка ниже)
 before=$(grep -c "зырнул" /tmp/zyrik.log)
 for i in $(seq 100); do
-  xdotool key ctrl+Print; sleep 0.25
-  xdotool mousemove 300 200 mousedown 1 mousemove 500 300 mouseup 1 key Return; sleep 0.1
+  hot ctrl+Print
+  xdotool mousemove 300 200 mousedown 1 mousemove 500 300 mouseup 1 key Return
 done
 sleep 0.3
 n=$(( $(grep -c "зырнул" /tmp/zyrik.log) - before ))

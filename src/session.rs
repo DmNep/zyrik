@@ -168,6 +168,9 @@ pub struct Session {
     windows: Vec<Rect>,
     /// Окно под курсором, пока зона не выбрана
     hover_window: Option<Rect>,
+    /// Был ли в этом выделении щелчок. Двойной щелчок без первого — это первый щелчок
+    /// в новом окне выделения, а «первый» достался прошлому (ОС помнит щелчки между показами).
+    clicked: bool,
 }
 
 /// Состояние поиска опасного.
@@ -209,6 +212,7 @@ impl Session {
             hover_finding: None,
             windows: Vec::new(),
             hover_window: None,
+            clicked: false,
         }
     }
 
@@ -472,7 +476,10 @@ impl Session {
                     Outcome::Cancel
                 }
             }
-            Input::Down(Button::Left, p) => self.left_down(p),
+            Input::Down(Button::Left, p) => {
+                self.clicked = true;
+                self.left_down(p)
+            }
             Input::Move(p) => {
                 self.pointer = Some(p);
                 let mut redraw_window = false;
@@ -513,6 +520,9 @@ impl Session {
             }
             Input::Up(Button::Right, _) => Outcome::Nothing,
             Input::DoubleClick(p) => {
+                if !self.clicked {
+                    return self.input(Input::Down(Button::Left, p));
+                }
                 if self.tool.is_some() || self.toolbar().is_some_and(|b| b.contains(p)) {
                     // с инструментом двойной щелчок — это просто ещё один щелчок
                     return self.left_down(p);

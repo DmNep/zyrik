@@ -406,3 +406,17 @@ fn click_on_bare_desktop_selects_nothing() {
     up(&mut s, 700, 700);
     assert_eq!(s.selection(), None);
 }
+
+#[test]
+fn double_click_without_first_click_is_a_press() {
+    // ОС засчитала двойной щелчок по щелчку из прошлого окна выделения: здесь это начало зоны
+    let mut s = s();
+    s.input(Input::DoubleClick(pt(100, 100)));
+    mv(&mut s, 200, 150);
+    up(&mut s, 300, 200);
+    assert_eq!(s.selection(), Some(Rect { x: 100, y: 100, w: 200, h: 100 }));
+    // а настоящий двойной щелчок по зоне по-прежнему подтверждает
+    down(&mut s, 150, 150);
+    up(&mut s, 150, 150);
+    assert!(matches!(s.input(Input::DoubleClick(pt(150, 150))), Outcome::Confirm(_)));
+}
