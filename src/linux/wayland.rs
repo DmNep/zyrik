@@ -456,7 +456,7 @@ impl Wayland {
             self.state.scale = 1.0;
             let _ = self.layout();
             let monitors = self.state.outputs.iter().map(|o| Monitor { rect: o.px, scale: 100 }).collect();
-            return Ok(Frame { x: 0, y: 0, image: img, monitors });
+            return Ok(Frame { x: 0, y: 0, image: img, monitors, desktop: Default::default() });
         }
         let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("KDE")));
         let img = match kde.then(super::kwin::capture) {
@@ -491,7 +491,7 @@ impl Wayland {
         };
         let scale = (self.state.scale * 100.0).round() as u32;
         let monitors = self.state.outputs.iter().map(|o| Monitor { rect: o.px, scale }).collect();
-        Ok(Frame { x: 0, y: 0, image: img, monitors })
+        Ok(Frame { x: 0, y: 0, image: img, monitors, desktop: Default::default() })
     }
 
     fn free_buffer(&mut self, i: usize) -> Result<usize, Problem> {
@@ -634,7 +634,7 @@ impl Platform for Wayland {
             .iter()
             .map(|o| Monitor { rect: o.px, scale: (scale * 100.0).round() as u32 })
             .collect();
-        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(w, h, px), monitors })
+        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(w, h, px), monitors, desktop: Default::default() })
     }
 
     fn show_overlay(&mut self, _x: i32, _y: i32, _w: u32, _h: u32) -> Result<(), Problem> {
@@ -773,6 +773,12 @@ impl Platform for Wayland {
         c.set_at = Instant::now();
         self.queue.flush().map_err(os)?;
         Ok(())
+    }
+
+    /// Наш источник жив, только пока он в буфере: заменили — пришёл `cancelled` и его уже нет.
+    fn clear_clipboard_if_ours(&mut self) {
+        self.clear_clipboard();
+        let _ = self.queue.flush();
     }
 
     fn places(&self) -> Vec<Place> {

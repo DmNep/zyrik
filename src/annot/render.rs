@@ -51,7 +51,19 @@ pub fn overlay(frame: &Image, session: &Session, out: &mut Image, lang: Lang) {
             *d = dim(*s);
         }
     }
-    let Some(sel) = session.selection() else { return };
+    let Some(sel) = session.selection() else {
+        // зоны ещё нет: окно под курсором — светлое и в рамке, щелчок выберет его (история 5)
+        if let Some(w) = session.hover_window() {
+            let width = out.width() as usize;
+            for y in w.y..w.bottom() {
+                let row = y as usize * width;
+                let (a, b) = (row + w.x as usize, row + w.right() as usize);
+                out.pixels_mut()[a..b].copy_from_slice(&frame.pixels()[a..b]);
+            }
+            border(out, Rect { x: w.x + BORDER, y: w.y + BORDER, w: (w.w - 2 * BORDER).max(1), h: (w.h - 2 * BORDER).max(1) });
+        }
+        return;
+    };
     let live = session.live();
     let baked = bake(frame, sel, session.marks().items(), live.as_ref(), &session.redactions());
     // внутри зоны — снимок с пометками, ярко

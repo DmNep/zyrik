@@ -26,7 +26,7 @@ shots=$(mktemp -d)
 mkdir "$shots/Снимки"
 cd /tmp
 strace -f -qq -e trace=openat,creat,rename,renameat,renameat2,unlink,unlinkat,mkdir,mkdirat,connect,socket -o /tmp/strace.txt \
-  "$exe" --lang ru --save-dir "$shots" 2>/tmp/zyrik.log &
+  "$exe" --lang ru --save-dir "$shots" --key-screen ctrl+F9 2>/tmp/zyrik.log &
 zpid=$!
 sleep 1.5
 
@@ -91,6 +91,34 @@ check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "Esc закр
 # 5. правый щелчок без зоны — отмена
 shot; xdotool click 3; sleep 0.1; xdotool click 3; sleep 0.2
 check '! xdotool search --onlyvisible --name "^Zyrik$" >/dev/null' "правая кнопка: сбросить зону, потом закрыть"
+
+
+paste_size() {  # вставить «с Ctrl» и вернуть размер PNG
+  xdotool keydown ctrl; sleep 0.05
+  xclip -selection clipboard -t image/png -o > /tmp/p.png 2>/dev/null
+  xdotool keyup ctrl; sleep 0.3
+  python3 -c "import struct;d=open('/tmp/p.png','rb').read();print(struct.unpack('>II',d[16:24]) if d[1:4]==b'PNG' else 'не PNG')"
+}
+
+# 6. история 5: --key-screen — весь монитор сразу выбран
+xdotool key ctrl+F9; sleep 0.4; xdotool key Return; sleep 0.3
+size=$(paste_size)
+check '[ "$size" = "(1600, 900)" ]' "--key-screen: весь монитор ($size)"
+
+# 7. история 5: щелчок по окну выбирает окно (без оконного менеджера — дети корня)
+xmessage -geometry 320x180+900+120 "окно для щелчка" &
+xm=$!; sleep 0.8
+want=$(xwininfo -name xmessage | awk '/Width:/{w=$2}/Height:/{h=$2}END{print "(" w ", " h ")"}')
+xdotool key ctrl+Print; sleep 0.4
+xdotool mousemove 1000 200; sleep 0.1; xdotool click 1; sleep 0.2; xdotool key Return; sleep 0.3
+size=$(paste_size)
+check '[ "$size" = "$want" ]' "щелчок по окну: выбрано окно ($size, у окна $want)"
+# протянуть по окну — всё равно обычная зона
+xdotool key ctrl+Print; sleep 0.4
+xdotool mousemove 950 150 mousedown 1 mousemove 1000 180 mousemove 1050 210 mouseup 1; sleep 0.2; xdotool key Return; sleep 0.3
+size=$(paste_size)
+check '[ "$size" = "(100, 60)" ]' "протягивание по окну — обычная зона ($size)"
+kill $xm 2>/dev/null
 
 pkill -x zyrik; wait $zpid 2>/dev/null
 

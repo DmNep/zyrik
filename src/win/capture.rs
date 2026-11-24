@@ -10,8 +10,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use zyrik::image::Image;
-use zyrik::platform::{Frame, Monitor, Problem};
-use zyrik::session::Rect;
+use zyrik::platform::{Desktop, Frame, Monitor, Problem};
+use zyrik::session::{Pt, Rect};
 
 pub fn capture() -> Result<Frame, Problem> {
     unsafe {
@@ -64,7 +64,7 @@ pub fn capture() -> Result<Frame, Problem> {
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
         let image = result?;
-        Ok(Frame { x, y, image, monitors: monitors(x, y) })
+        Ok(Frame { x, y, image, monitors: monitors(x, y), desktop: desktop(x, y) })
     }
 }
 
@@ -94,4 +94,65 @@ fn monitors(ox: i32, oy: i32) -> Vec<Monitor> {
         let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut ctx as *mut Ctx as isize));
     }
     ctx.list
+}
+
+/// Окна сверху вниз, активное окно и курсор — в координатах кадра (история 5).
+fn desktop(ox: i32, oy: i32) -> Desktop {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    /// Видимая рамка окна (без невидимых полей изменения размера); `None` — окно не показываем.
+    unsafe fn bounds(h: HWND, ox: i32, oy: i32) -> Option<Rect> {
+        if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
+            return None;
+        }
+        let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+        if ex & WS_EX_TOOLWINDOW.0 != 0 && ex & WS_EX_APPWINDOW.0 == 0 {
+            return None;
+        }
+        // окна других виртуальных столов и «спящие» UWP: видимы для API, но не на экране
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+        if cloaked != 0 {
+            return None;
+        }
+        // рабочий стол не окно: щелчок по нему начинает обычное выделение
+        let mut class = [0u16; 32];
+        let n = GetClassNameW(h, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]);
+        if class == "Progman" || class == "WorkerW" {
+            return None;
+        }
+        let mut r = RECT::default();
+        if DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut RECT as *mut _, std::mem::size_of::<RECT>() as u32)
+            .is_err()
+        {
+            GetWindowRect(h, &mut r).ok()?;
+        }
+        (r.right > r.left && r.bottom > r.top)
+            .then(|| Rect { x: r.left - ox, y: r.top - oy, w: r.right - r.left, h: r.bottom - r.top })
+    }
+    struct Ctx {
+        ox: i32,
+        oy: i32,
+        list: Vec<Rect>,
+    }
+    unsafe extern "system" fn each(h: HWND, data: LPARAM) -> BOOL {
+        let ctx = &mut *(data.0 as *mut Ctx);
+        if let Some(r) = bounds(h, ctx.ox, ctx.oy) {
+            ctx.list.push(r);
+        }
+        true.into()
+    }
+    let mut ctx = Ctx { ox, oy, list: Vec::new() };
+    unsafe {
+        // EnumWindows идёт по окнам верхнего уровня сверху вниз
+        let _ = EnumWindows(Some(each), LPARAM(&mut ctx as *mut Ctx as isize));
+        let fg = GetForegroundWindow();
+        let active = if fg.is_invalid() { None } else { bounds(fg, ox, oy) };
+        let mut p = windows::Win32::Foundation::POINT::default();
+        let cursor = GetCursorPos(&mut p).ok().map(|()| Pt { x: p.x - ox, y: p.y - oy });
+        Desktop { windows: ctx.list, active, cursor }
+    }
 }

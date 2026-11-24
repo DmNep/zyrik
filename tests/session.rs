@@ -373,3 +373,36 @@ fn wheel_sets_text_size_for_text_tool() {
     s.input(Input::Wheel(100, pt(1, 1)));
     assert_eq!(s.stroke(), zyrik::annot::MAX_WIDTH);
 }
+
+// ---------- окна (история 5) ----------
+
+#[test]
+fn hover_outlines_window_and_click_selects_it() {
+    let mut s = s();
+    s.set_windows(vec![Rect { x: 100, y: 100, w: 300, h: 200 }, Rect { x: -50, y: 700, w: 400, h: 400 }]);
+    mv(&mut s, 150, 150);
+    assert_eq!(s.hover_window(), Some(Rect { x: 100, y: 100, w: 300, h: 200 }));
+    mv(&mut s, 50, 750);
+    assert_eq!(s.hover_window(), Some(Rect { x: 0, y: 700, w: 350, h: 100 }), "окно обрезано по экрану");
+    down(&mut s, 50, 750);
+    up(&mut s, 50, 750);
+    assert_eq!(s.selection(), Some(Rect { x: 0, y: 700, w: 350, h: 100 }));
+    assert_eq!(s.hover_window(), None, "при выбранной зоне окна не подсвечиваются");
+}
+
+#[test]
+fn drag_over_window_still_makes_a_region() {
+    let mut s = s();
+    s.set_windows(vec![Rect { x: 100, y: 100, w: 300, h: 200 }]);
+    drag(&mut s, (120, 120), (220, 180));
+    assert_eq!(s.selection(), Some(Rect { x: 120, y: 120, w: 100, h: 60 }));
+}
+
+#[test]
+fn click_on_bare_desktop_selects_nothing() {
+    let mut s = s();
+    s.set_windows(vec![Rect { x: 100, y: 100, w: 300, h: 200 }]);
+    down(&mut s, 700, 700);
+    up(&mut s, 700, 700);
+    assert_eq!(s.selection(), None);
+}

@@ -217,6 +217,17 @@ impl Incr {
     }
 }
 
+/// `--clear-clipboard`: время вышло. Буфер не читаем: смотрим только, владеем ли им ещё.
+pub fn clear_if_ours(x: &X) {
+    x.clip.lock().unwrap().wipe();
+    let a = x.atoms.clipboard;
+    let ours = x.conn.get_selection_owner(a).ok().and_then(|r| r.reply().ok()).map(|r| r.owner) == Some(x.owner);
+    if ours {
+        let _ = x.conn.set_selection_owner(NONE, a, CURRENT_TIME);
+    }
+    let _ = x.conn.flush();
+}
+
 /// Вставили с зажатым Ctrl/Super: как отпустят — отказываемся от буфера и затираем снимок.
 fn watch(x: Arc<X>, generation: u64) {
     std::thread::spawn(move || loop {

@@ -189,10 +189,13 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                         };
                         active = None;
                         match result {
-                            Ok(()) => p.debug_log(&format!(
-                                "{} {sw}x{sh}",
-                                lang.fmt(Msg::LogCaptured, &[("shot", what)])
-                            )),
+                            Ok(()) => {
+                                p.debug_log(&format!("{} {sw}x{sh}", lang.fmt(Msg::LogCaptured, &[("shot", what)])));
+                                // --clear-clipboard: если снимок так и не вставили — убрать через N минут
+                                if let Some(min) = opts.clear_clipboard {
+                                    p.schedule(Command::ClearClipboard, min * 60_000);
+                                }
+                            }
                             Err(e) => p.message(
                                 title,
                                 &lang.fmt(Msg::ClipboardFailed, &[("error", &format!("{e:?}"))]),
@@ -221,6 +224,7 @@ pub fn run<P: Platform>(p: &mut P, opts: &Options, lang: Lang) {
                     Outcome::SaveAs(_) => a.open_picker(p, last_dir.as_deref(), None),
                 }
             }
+            Command::ClearClipboard => p.clear_clipboard_if_ours(),
             Command::Tick => {
                 let Some(a) = active.as_mut() else { continue };
                 let Some(rx) = &a.ocr else { continue };
@@ -355,6 +359,22 @@ fn start<P: Platform>(p: &mut P, lang: Lang, shot: Shot, detect: bool) -> Option
     // Экран и окно (история 5) — фаза 5; пока любая клавиша открывает выделение области.
     let (w, h) = (frame.image.width(), frame.image.height());
     let mut session = Session::with_monitors(w, h, frame.monitors.clone());
+    session.set_windows(frame.desktop.windows.clone());
+    // История 5: весь монитор под курсором или активное окно — сразу выбранной зоной
+    match shot {
+        Shot::Screen => {
+            let m = frame.desktop.cursor.and_then(|c| frame.monitors.iter().find(|m| m.rect.contains(c))).or(frame.monitors.first());
+            if let Some(m) = m {
+                session.select(m.rect);
+            }
+        }
+        Shot::Window => {
+            if let Some(r) = frame.desktop.active {
+                session.select(r);
+            }
+        }
+        Shot::Region => {}
+    }
     // Поиск опасного: распознавание всего кадра в отдельном потоке — выделение не ждёт.
     // Копия кадра у потока затирается при удалении (Image::drop).
     let ocr = (detect && crate::ocr::available()).then(|| {

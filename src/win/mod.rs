@@ -235,6 +235,10 @@ impl Platform for Win {
         clipboard::set_image(self.hwnd, image)
     }
 
+    fn clear_clipboard_if_ours(&mut self) {
+        clipboard::clear_if_ours(self.hwnd);
+    }
+
     fn places(&self) -> Vec<zyrik::platform::Place> {
         places::places()
     }

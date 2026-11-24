@@ -10,7 +10,7 @@ use zyrik::args::{parse, Launch, Options};
 use zyrik::hotkey::Hotkey;
 use zyrik::i18n::Lang;
 use zyrik::image::Image;
-use zyrik::platform::{Command, Frame, MenuItem, Monitor, Place, PlaceKind, Platform, Problem, Shot};
+use zyrik::platform::{Command, Desktop, Frame, MenuItem, Monitor, Place, PlaceKind, Platform, Problem, Shot};
 use zyrik::session::{Button, Cursor, Input, Key, Pt, Rect};
 
 #[derive(Default)]
@@ -32,6 +32,10 @@ struct Fake {
     pictures: Option<PathBuf>,
     /// Wayland без data-control: буфер — пока окно выделения ещё показано
     needs_focus: bool,
+    /// окна, активное окно, курсор и мониторы, которые «сообщает ОС»
+    desktop: Desktop,
+    monitors: Option<Vec<Monitor>>,
+    cleared: u32,
 }
 
 /// Кадр 400×300 в координатах ОС (-100, 0): у каждого пикселя своё значение.
@@ -43,6 +47,7 @@ fn test_frame() -> Frame {
         y: 0,
         image: Image::from_pixels(w, h, px),
         monitors: vec![Monitor { rect: Rect { x: 0, y: 0, w: 400, h: 300 }, scale: 100 }],
+        desktop: Default::default(),
     }
 }
 
@@ -76,7 +81,12 @@ impl Platform for Fake {
     fn capture(&mut self) -> Result<Frame, Problem> {
         assert!(self.overlay.is_none(), "снимать, пока на экране наше окно, нельзя");
         self.captures += 1;
-        Ok(test_frame())
+        let mut f = test_frame();
+        f.desktop = self.desktop.clone();
+        if let Some(m) = &self.monitors {
+            f.monitors = m.clone();
+        }
+        Ok(f)
     }
     fn show_overlay(&mut self, x: i32, y: i32, w: u32, h: u32) -> Result<(), Problem> {
         self.overlay = Some((x, y, w, h));
@@ -102,6 +112,9 @@ impl Platform for Fake {
         self.clipboard = Some((image.width(), image.height(), image.pixels().to_vec()));
         Ok(())
     }
+    fn clear_clipboard_if_ours(&mut self) {
+        self.cleared += 1;
+    }
     fn clipboard_needs_focus(&self) -> bool {
         self.needs_focus
     }
@@ -122,7 +135,7 @@ impl Platform for Fake {
 fn opts(args: &[&str]) -> Options {
     match parse(args.iter().copied()).unwrap() {
         Launch::Run(o) => o,
-        Launch::Help | Launch::Trigger => unreachable!(),
+        Launch::Help | Launch::Trigger(_) => unreachable!(),
     }
 }
 
@@ -444,4 +457,101 @@ fn clipboard_before_hiding_when_platform_needs_focus() {
     let f = go(fake, &[]);
     assert_eq!(f.clipboard.as_ref().map(|c| (c.0, c.1)), Some((100, 50)));
     assert_eq!(f.overlay, None, "окно всё равно спрятано");
+}
+
+// ---------- история 5: монитор, окно, щелчок по окну; очистка буфера ----------
+
+fn two_monitors() -> Option<Vec<Monitor>> {
+    Some(vec![
+        Monitor { rect: Rect { x: 0, y: 0, w: 200, h: 300 }, scale: 100 },
+        Monitor { rect: Rect { x: 200, y: 0, w: 200, h: 300 }, scale: 100 },
+    ])
+}
+
+#[test]
+fn screen_shot_takes_monitor_under_cursor() {
+    let mut fake = Fake {
+        monitors: two_monitors(),
+        desktop: Desktop { cursor: Some(Pt { x: 250, y: 10 }), ..Desktop::default() },
+        ..Fake::default()
+    };
+    fake.commands.extend([Command::Capture(Shot::Screen), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    let (w, h, px) = f.clipboard.expect("снимок в буфере");
+    assert_eq!((w, h), (200, 300));
+    assert_eq!(px, test_frame().image.crop(Rect { x: 200, y: 0, w: 200, h: 300 }).pixels());
+}
+
+#[test]
+fn screen_shot_without_cursor_takes_first_monitor() {
+    let mut fake = Fake { monitors: two_monitors(), ..Fake::default() };
+    fake.commands.extend([Command::Capture(Shot::Screen), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    assert_eq!(f.clipboard.map(|c| (c.0, c.1)), Some((200, 300)));
+}
+
+#[test]
+fn window_shot_takes_active_window_clipped_to_screen() {
+    let mut fake = Fake {
+        desktop: Desktop { active: Some(Rect { x: 300, y: 100, w: 300, h: 50 }), ..Desktop::default() },
+        ..Fake::default()
+    };
+    fake.commands.extend([Command::Capture(Shot::Window), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    let (w, h, px) = f.clipboard.expect("снимок в буфере");
+    assert_eq!((w, h), (100, 50), "окно обрезано по краю экрана");
+    assert_eq!(px, test_frame().image.crop(Rect { x: 300, y: 100, w: 100, h: 50 }).pixels());
+}
+
+#[test]
+fn window_shot_without_known_window_is_a_region_shot() {
+    // Wayland: окна не известны — открывается обычное выделение
+    let mut fake = Fake::default();
+    fake.commands.extend([Command::Capture(Shot::Window), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    assert!(f.clipboard.is_none(), "без зоны Enter ничего не кладёт");
+    assert_eq!(f.presented, 1);
+}
+
+#[test]
+fn click_on_window_selects_it() {
+    let mut fake = Fake {
+        desktop: Desktop {
+            // сверху вниз: маленькое окно поверх большого
+            windows: vec![Rect { x: 50, y: 50, w: 40, h: 30 }, Rect { x: 10, y: 10, w: 200, h: 200 }],
+            ..Desktop::default()
+        },
+        ..Fake::default()
+    };
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        ov(Input::Move(Pt { x: 60, y: 60 })),
+        left_down(60, 60),
+        left_up(60, 60),
+        key(Key::Enter),
+    ]);
+    let f = go(fake, &[]);
+    assert_eq!(f.clipboard.map(|c| (c.0, c.1)), Some((40, 30)), "выбрано верхнее окно");
+}
+
+#[test]
+fn clear_clipboard_is_scheduled_after_copy_only() {
+    let mut fake = Fake::default();
+    fake.commands.extend([
+        Command::Capture(Shot::Region),
+        left_down(10, 20),
+        left_up(110, 70),
+        key(Key::Enter),
+        Command::ClearClipboard,
+    ]);
+    let f = go(fake, &["--clear-clipboard", "5"]);
+    assert!(f.clipboard.is_some());
+    assert_eq!(f.scheduled, [(Command::ClearClipboard, 5 * 60_000)]);
+    assert_eq!(f.cleared, 1);
+
+    // без параметра — ничего не планируется
+    let mut fake = Fake::default();
+    fake.commands.extend([Command::Capture(Shot::Region), left_down(10, 20), left_up(110, 70), key(Key::Enter)]);
+    let f = go(fake, &[]);
+    assert!(f.scheduled.is_empty());
 }

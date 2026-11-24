@@ -34,7 +34,7 @@ fn main() {
         let title = lang.tr(Msg::AppName);
         match args::parse(&raw) {
             Ok(Launch::Help) => win::explain(title, &app::help_text(lang), false),
-            Ok(Launch::Trigger) => win::explain(title, lang.tr(Msg::TriggerUnsupported), true),
+            Ok(Launch::Trigger(_)) => win::explain(title, lang.tr(Msg::TriggerUnsupported), true),
             Ok(Launch::Run(opts)) => app::run(&mut platform, &opts, lang),
             Err(e) => {
                 win::explain(title, &app::arg_error_text(&e, lang), true);
@@ -52,8 +52,8 @@ fn main() {
         let title = lang.tr(Msg::AppName);
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
-            Ok(Launch::Trigger) => {
-                if let Err(e) = linux::trigger() {
+            Ok(Launch::Trigger(shot)) => {
+                if let Err(e) = linux::trigger(shot) {
                     eprintln!("{}", lang.tr(Msg::TriggerNotRunning));
                     eprintln!("({e})");
                     std::process::exit(1);
@@ -98,7 +98,7 @@ fn main() {
         let lang = i18n::choose(hint.as_deref(), env_lang.as_deref());
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
-            Ok(Launch::Trigger) => {
+            Ok(Launch::Trigger(_)) => {
                 eprintln!("{}", lang.tr(Msg::TriggerUnsupported));
                 std::process::exit(2);
             }
@@ -131,7 +131,7 @@ fn main() {
         let lang = i18n::choose(args::lang_hint(&raw).as_deref(), system.as_deref());
         match args::parse(&raw) {
             Ok(Launch::Help) => println!("{}", app::help_text(lang)),
-            Ok(Launch::Trigger) | Ok(Launch::Run(_)) => {
+            Ok(Launch::Trigger(_)) | Ok(Launch::Run(_)) => {
                 eprintln!("{}", lang.tr(Msg::ErrPlatform));
                 std::process::exit(1);
             }

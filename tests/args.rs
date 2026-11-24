@@ -165,3 +165,15 @@ fn lang_hint_reads_lang_even_when_parsing_fails() {
     assert_eq!(lang_hint(["--lang", "xx"]), None);
     assert_eq!(lang_hint(["--key", "F1"]), None);
 }
+
+#[test]
+fn trigger_takes_optional_shot() {
+    use zyrik::platform::Shot;
+    let t = |a: &[&str]| parse(a.iter().copied()).unwrap();
+    assert_eq!(t(&["--trigger"]), Launch::Trigger(Shot::Region));
+    assert_eq!(t(&["--trigger", "region"]), Launch::Trigger(Shot::Region));
+    assert_eq!(t(&["--trigger", "screen"]), Launch::Trigger(Shot::Screen));
+    assert_eq!(t(&["--trigger", "window"]), Launch::Trigger(Shot::Window));
+    assert_eq!(err(&["--trigger", "--trigger"]), ArgError::Duplicate("--trigger"));
+    assert!(matches!(err(&["--trigger", "moon"]), ArgError::Unknown(_)));
+}

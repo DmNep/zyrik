@@ -229,6 +229,19 @@ unsafe fn clear(owner: HWND) -> bool {
     true
 }
 
+/// `--clear-clipboard`: время вышло. Чужое содержимое не трогаем.
+pub fn clear_if_ours(owner: HWND) {
+    unsafe {
+        let _ = KillTimer(Some(owner), WATCH_TIMER);
+        let _ = KillTimer(Some(owner), REARM_TIMER);
+        if !clear(owner) {
+            // буфер занят на миг — ещё одна попытка
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let _ = clear(owner);
+        }
+    }
+}
+
 /// Сообщения буфера и его таймеры для главного окна. `None` — сообщение не наше.
 pub fn handle(owner: HWND, msg: u32, wparam: WPARAM) -> Option<LRESULT> {
     unsafe {

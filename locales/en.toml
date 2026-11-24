@@ -133,7 +133,7 @@ Usage: zyrik [options]
   --key <keys>              snap a region (default {default_key})
   --key-screen <keys>       snap the whole monitor (unassigned by default)
   --key-window <keys>       snap the active window (unassigned by default)
-  --trigger                 ask the running Zyrik to snap (Linux: bind it in Sway/Hyprland)
+  --trigger [screen|window] ask the running Zyrik to snap (Linux: bind it in Sway/Hyprland)
   --save-dir <folder>       where Ctrl+S saves (default: Pictures)
   --clear-clipboard <min>   clear the clipboard after this many minutes if the shot is still there
   --no-detect               do not look for private data on the shot

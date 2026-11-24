@@ -49,7 +49,7 @@ use zyrik::export::{encode_png, Stamp};
 use zyrik::hotkey::Hotkey;
 use zyrik::image::Image;
 use zyrik::oneshot::{Answer, OneShot};
-use zyrik::platform::{Command, Frame, MenuItem, Monitor, Place, PlaceKind, Platform, Problem, Shot};
+use zyrik::platform::{Command, Desktop, Frame, MenuItem, Monitor, Place, PlaceKind, Platform, Problem, Shot};
 use zyrik::session::{Button, Cursor, Input, Pt, Rect};
 
 /// kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little: в памяти B,G,R,A — как наш u32.
@@ -445,6 +445,72 @@ fn provide(item: &NSPasteboardItem, ty: &NSString) {
     }
 }
 
+/// `--clear-clipboard`: время вышло. Содержимое не читаем: наш ли снимок — по changeCount.
+fn clear_clip_if_ours() {
+    let count = with(|s| s.clip.count);
+    let pb = NSPasteboard::generalPasteboard();
+    if count != 0 && pb.changeCount() == count {
+        pb.clearContents();
+    }
+    wipe_clip();
+}
+
+/// Окна сверху вниз, активное окно и курсор в пикселях кадра (история 5).
+/// `CGWindowListCopyWindowInfo` отдаёт окна спереди назад; границы — в точках, начало
+/// в левом верхнем углу главного экрана. Имена окон не берём — только границы и владельца.
+fn desktop(scale: f64, screens: &[Screen]) -> Desktop {
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::NSWorkspace;
+    use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
+    use objc2_foundation::NSDictionary;
+
+    let Some(main) = screens.first() else { return Desktop::default() };
+    let min_x = screens.iter().map(|s| s.frame.origin.x).fold(f64::MAX, f64::min);
+    let max_y = screens.iter().map(|s| s.frame.origin.y + s.frame.size.height).fold(f64::MIN, f64::max);
+    let main_h = main.frame.size.height;
+    let px = |v: f64| (v * scale).round() as i32;
+
+    let num = |d: &NSDictionary<NSString, AnyObject>, k: &str| -> Option<f64> {
+        d.objectForKey(&ns(k)).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.doubleValue())
+    };
+    let me = std::process::id() as f64;
+    let mut windows = Vec::new();
+    let mut owners = Vec::new();
+    let opts = CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+    if let Some(list) = CGWindowListCopyWindowInfo(opts, 0) {
+        // CFArray и NSArray — один и тот же объект (toll-free bridging)
+        let list: &NSArray<NSDictionary<NSString, AnyObject>> =
+            unsafe { &*(CFRetained::as_ptr(&list).as_ptr() as *const NSArray<NSDictionary<NSString, AnyObject>>) };
+        for d in list.iter() {
+            // слой 0 — обычные окна; меню, Dock и панели выше
+            if num(&d, "kCGWindowLayer") != Some(0.0) || num(&d, "kCGWindowAlpha") == Some(0.0) {
+                continue;
+            }
+            let pid = num(&d, "kCGWindowOwnerPID").unwrap_or(-1.0);
+            if pid == me {
+                continue;
+            }
+            let Some(b) = d.objectForKey(&ns("kCGWindowBounds")) else { continue };
+            let b: &NSDictionary<NSString, AnyObject> =
+                unsafe { &*(Retained::as_ptr(&b) as *const NSDictionary<NSString, AnyObject>) };
+            let (Some(x), Some(y), Some(w), Some(h)) = (num(b, "X"), num(b, "Y"), num(b, "Width"), num(b, "Height"))
+            else {
+                continue;
+            };
+            let r = Rect { x: px(x - min_x), y: px(y + max_y - main_h), w: px(w), h: px(h) };
+            if r.w > 0 && r.h > 0 {
+                windows.push(r);
+                owners.push(pid);
+            }
+        }
+    }
+    let front = NSWorkspace::sharedWorkspace().frontmostApplication().map(|a| a.processIdentifier() as f64);
+    let active = front.and_then(|pid| owners.iter().position(|&o| o == pid)).map(|i| windows[i]);
+    let m = NSEvent::mouseLocation();
+    let cursor = Some(Pt { x: px(m.x - min_x), y: px(max_y - m.y) });
+    Desktop { windows, active, cursor }
+}
+
 /// Cmd отпустили после вставки — очищаем буфер, если там всё ещё наш снимок.
 fn watch_clip() {
     let (watching, count) = with(|s| (s.clip.watching, s.clip.count));
@@ -727,11 +793,12 @@ impl Platform for Mac {
             zeroize::Zeroize::zeroize(&mut part);
             monitors.push(Monitor { rect: scr.px, scale: (scale * 100.0).round() as u32 });
         }
+        let desktop = desktop(scale, &screens);
         with(|s| {
             s.scale = scale;
             s.screens = screens;
         });
-        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(w, h, px), monitors })
+        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(w, h, px), monitors, desktop })
     }
 
     fn show_overlay(&mut self, _x: i32, _y: i32, _w: u32, _h: u32) -> Result<(), Problem> {
@@ -842,6 +909,10 @@ impl Platform for Mac {
                 Err(e)
             }
         }
+    }
+
+    fn clear_clipboard_if_ours(&mut self) {
+        clear_clip_if_ours();
     }
 
     fn places(&self) -> Vec<Place> {

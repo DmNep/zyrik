@@ -28,8 +28,9 @@ pub struct Options {
 pub enum Launch {
     Run(Options),
     Help,
-    /// `--trigger`: попросить уже запущенный Зырик зырнуть (Linux; бинд в конфиге Sway/Hyprland)
-    Trigger,
+    /// `--trigger [region|screen|window]`: попросить уже запущенный Зырик зырнуть
+    /// (Linux; бинд в конфиге Sway/Hyprland)
+    Trigger(crate::platform::Shot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,15 +79,25 @@ where
     let mut clear_clipboard = None;
     let mut no_detect = false;
     let mut lang = None;
-    let mut trigger = false;
+    let mut trigger = None;
 
-    let mut it = args.iter();
+    let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         if arg == TRIGGER {
-            if trigger {
+            if trigger.is_some() {
                 return Err(ArgError::Duplicate(TRIGGER));
             }
-            trigger = true;
+            use crate::platform::Shot;
+            let shot = match it.peek().map(|s| s.as_str()) {
+                Some("region") => Some(Shot::Region),
+                Some("screen") => Some(Shot::Screen),
+                Some("window") => Some(Shot::Window),
+                _ => None,
+            };
+            if shot.is_some() {
+                it.next();
+            }
+            trigger = Some(shot.unwrap_or(Shot::Region));
             continue;
         }
         if arg == NO_DETECT {
@@ -152,8 +163,8 @@ where
         }
     }
 
-    if trigger {
-        return Ok(Launch::Trigger);
+    if let Some(shot) = trigger {
+        return Ok(Launch::Trigger(shot));
     }
     let key = key.unwrap_or_else(Hotkey::default_capture);
     let named = [(KEY, Some(key)), (KEY_SCREEN, key_screen), (KEY_WINDOW, key_window)];

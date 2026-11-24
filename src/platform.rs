@@ -30,6 +30,8 @@ pub enum Command {
     Quit,
     /// Таймер ядра: проверить, готово ли распознавание текста
     Tick,
+    /// `--clear-clipboard`: время вышло — очистить буфер, если там всё ещё наш снимок
+    ClearClipboard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,17 @@ pub struct Monitor {
     pub scale: u32,
 }
 
+/// Что было на экране в момент снимка (история 5), в координатах кадра. Что ОС не сообщает
+/// (Wayland — окна и курсор), остаётся пустым: тогда «окно» сводится к обычному выделению.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Desktop {
+    /// Окна сверху вниз (видимые, верхнего уровня)
+    pub windows: Vec<Rect>,
+    /// Активное окно
+    pub active: Option<Rect>,
+    pub cursor: Option<crate::session::Pt>,
+}
+
 /// Снимок всех мониторов в памяти. Пиксели затираются при удалении (FR-009).
 #[derive(Debug)]
 pub struct Frame {
@@ -62,6 +75,7 @@ pub struct Frame {
     pub y: i32,
     pub image: Image,
     pub monitors: Vec<Monitor>,
+    pub desktop: Desktop,
 }
 
 /// Известная папка или диск — верхний уровень выбора папки (`picker`).
@@ -129,6 +143,10 @@ pub trait Platform {
     /// Платформа держит картинку у себя, пока её не вставят, и затирает после.
     /// Содержимое буфера программа не читает никогда.
     fn set_clipboard_image(&mut self, image: Image) -> Result<(), Problem>;
+
+    /// Очистить буфер, только если там всё ещё наш снимок (FR-004, `--clear-clipboard`).
+    /// Содержимое буфера не читается: проверяется лишь, что владелец — мы.
+    fn clear_clipboard_if_ours(&mut self) {}
 
     /// Буфер можно занять, только пока окно выделения в фокусе (Wayland без data-control,
     /// например GNOME). Тогда ядро кладёт снимок в буфер до того, как спрятать окно.

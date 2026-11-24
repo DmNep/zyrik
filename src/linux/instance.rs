@@ -16,7 +16,9 @@ use zyrik::platform::{Command, Problem, Shot};
 
 use super::Event;
 
-const CAPTURE: &[u8] = b"capture\n";
+/// Команды сокета: что снимать.
+const COMMANDS: [(&[u8], Shot); 3] =
+    [(b"capture\n", Shot::Region), (b"capture-screen\n", Shot::Screen), (b"capture-window\n", Shot::Window)];
 
 fn addr() -> io::Result<SocketAddr> {
     let uid = unsafe { libc::getuid() };
@@ -56,8 +58,8 @@ pub fn claim(tx: Sender<Event>) -> Result<(), Problem> {
             let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
             let mut buf = [0u8; 16];
             let n = s.read(&mut buf).unwrap_or(0);
-            if &buf[..n] == CAPTURE {
-                let _ = tx.send(Event::Cmd(Command::Capture(Shot::Region)));
+            if let Some(&(_, shot)) = COMMANDS.iter().find(|(c, _)| &buf[..n] == *c) {
+                let _ = tx.send(Event::Cmd(Command::Capture(shot)));
                 let _ = s.write_all(b"ok\n");
             }
         }
@@ -66,10 +68,11 @@ pub fn claim(tx: Sender<Event>) -> Result<(), Problem> {
 }
 
 /// `zyrik --trigger`: попросить запущенный Зырик зырнуть. Ошибка — Зырик не запущен.
-pub fn trigger() -> io::Result<()> {
+pub fn trigger(shot: Shot) -> io::Result<()> {
+    let cmd = COMMANDS.iter().find(|(_, s)| *s == shot).map_or(COMMANDS[0].0, |(c, _)| *c);
     let mut s = UnixStream::connect_addr(&addr()?)?;
     s.set_read_timeout(Some(Duration::from_secs(2)))?;
-    s.write_all(CAPTURE)?;
+    s.write_all(cmd)?;
     let mut buf = [0u8; 3];
     s.read_exact(&mut buf)?;
     if &buf == b"ok\n" {

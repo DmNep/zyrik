@@ -164,6 +164,10 @@ pub struct Session {
     danger: bool,
     detect: Detect,
     hover_finding: Option<usize>,
+    /// Окна в момент снимка, сверху вниз (история 5)
+    windows: Vec<Rect>,
+    /// Окно под курсором, пока зона не выбрана
+    hover_window: Option<Rect>,
 }
 
 /// Состояние поиска опасного.
@@ -203,7 +207,35 @@ impl Session {
             danger: false,
             detect: Detect::Off,
             hover_finding: None,
+            windows: Vec::new(),
+            hover_window: None,
         }
+    }
+
+    // ---------- окна (история 5) ----------
+
+    /// Окна на экране в момент снимка, сверху вниз; обрезаются по экрану.
+    pub fn set_windows(&mut self, windows: Vec<Rect>) {
+        let screen = Rect { x: 0, y: 0, w: self.width, h: self.height };
+        self.windows = windows.into_iter().filter_map(|r| clip(r, screen)).collect();
+    }
+
+    /// Сразу выбрать зону (весь монитор, активное окно).
+    pub fn select(&mut self, r: Rect) {
+        let screen = Rect { x: 0, y: 0, w: self.width, h: self.height };
+        if let Some(r) = clip(r, screen) {
+            self.sel = Some(r);
+            self.hover_window = None;
+        }
+    }
+
+    pub fn hover_window(&self) -> Option<Rect> {
+        self.hover_window
+    }
+
+    /// Верхнее окно под точкой.
+    fn window_at(&self, p: Pt) -> Option<Rect> {
+        self.windows.iter().copied().find(|r| r.contains(p))
     }
 
     // ---------- поиск опасного ----------
@@ -443,9 +475,15 @@ impl Session {
             Input::Down(Button::Left, p) => self.left_down(p),
             Input::Move(p) => {
                 self.pointer = Some(p);
+                let mut redraw_window = false;
                 let hover = self.toolbar().and_then(|b| b.hit(p));
                 let hf = if hover.is_none() && matches!(self.drag, Drag::None) { self.finding_at(p) } else { None };
-                let mut redraw = hover != self.hover || self.preview || hf != self.hover_finding;
+                let hw = if self.sel.is_none() && matches!(self.drag, Drag::None) { self.window_at(p) } else { None };
+                if hw != self.hover_window {
+                    self.hover_window = hw;
+                    redraw_window = true;
+                }
+                let mut redraw = hover != self.hover || self.preview || hf != self.hover_finding || redraw_window;
                 self.hover = hover;
                 self.hover_finding = hf;
                 self.preview = false;
@@ -455,6 +493,14 @@ impl Session {
                 if redraw { Outcome::Redraw } else { Outcome::Nothing }
             }
             Input::Up(Button::Left, p) => {
+                // щелчок без протягивания там, где новая зона начиналась бы, — выбрать окно (история 5)
+                if let Drag::Creating { started: false, .. } = self.drag {
+                    if let Some(w) = self.window_at(self.clamp_pt(p)) {
+                        self.drag = Drag::None;
+                        self.select(w);
+                        return Outcome::Redraw;
+                    }
+                }
                 let mut out = self.drag_to(p);
                 if let Drag::Drawing { .. } = self.drag {
                     if let Some(m) = self.live() {
@@ -747,4 +793,13 @@ fn edges_cursor(e: Edges) -> Cursor {
 /// Прямоугольник `inner` целиком внутри `outer`.
 fn inside(outer: Rect, inner: Rect) -> bool {
     inner.x >= outer.x && inner.y >= outer.y && inner.right() <= outer.right() && inner.bottom() <= outer.bottom()
+}
+
+/// Пересечение с экраном; пустое — `None`.
+fn clip(r: Rect, screen: Rect) -> Option<Rect> {
+    let l = r.x.max(screen.x);
+    let t = r.y.max(screen.y);
+    let rr = r.right().min(screen.right());
+    let b = r.bottom().min(screen.bottom());
+    (rr > l && b > t).then_some(Rect { x: l, y: t, w: rr - l, h: b - t })
 }

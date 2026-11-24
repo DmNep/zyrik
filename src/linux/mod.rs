@@ -14,6 +14,7 @@ mod kwin;
 mod portal;
 pub(crate) mod tray;
 mod wayland;
+mod windows;
 
 pub use wayland::Wayland;
 
@@ -484,7 +485,7 @@ impl Platform for Linux {
         if px.len() != usize::from(w) * usize::from(h) {
             return Err(Problem::Os("GetImage: неожиданный размер".into()));
         }
-        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(u32::from(w), u32::from(h), px), monitors: monitors(x, w, h) })
+        Ok(Frame { x: 0, y: 0, image: Image::from_pixels(u32::from(w), u32::from(h), px), monitors: monitors(x, w, h), desktop: windows::desktop(x) })
     }
 
     fn show_overlay(&mut self, x0: i32, y0: i32, width: u32, height: u32) -> Result<(), Problem> {
@@ -567,6 +568,10 @@ impl Platform for Linux {
         let r = clipboard::set_image(&self.x, image);
         let _ = self.x.conn.flush();
         r
+    }
+
+    fn clear_clipboard_if_ours(&mut self) {
+        clipboard::clear_if_ours(&self.x);
     }
 
     fn places(&self) -> Vec<Place> {
