@@ -404,31 +404,50 @@ impl Platform for Linux {
 
     fn register_hotkey(&mut self, shot: Shot, key: Hotkey) -> Result<(), Problem> {
         let x = &self.x;
+        // У одной клавиши может быть несколько кодов (раскладка Xvfb в Ubuntu, клавиатуры с
+        // дублями) — захватываем все: какой из них придёт, заранее не знать.
         let codes = x.keymap.lock().unwrap().codes(keys::hotkey_sym(key.key));
-        let code = *codes.first().ok_or_else(|| Problem::Os(format!("на клавиатуре нет клавиши {key}")))?;
+        if codes.is_empty() {
+            return Err(Problem::Os(format!("на клавиатуре нет клавиши {key}")));
+        }
         let mods = keys::hotkey_mods(key.mods);
-        let mut grabbed = Vec::new();
-        for ignored in keys::IGNORED {
-            let m = u16::from(mods) | ignored;
-            let r = x
-                .conn
-                .grab_key(false, x.root, m.into(), code, GrabMode::ASYNC, GrabMode::ASYNC)
-                .map_err(os)?
-                .check();
-            match r {
-                Ok(()) => grabbed.push(m),
-                Err(err) => {
+        let mut taken = Vec::new();
+        let mut busy = None;
+        for code in codes {
+            let mut grabbed = Vec::new();
+            let mut failed = None;
+            for ignored in keys::IGNORED {
+                let m = u16::from(mods) | ignored;
+                let r = x.conn.grab_key(false, x.root, m.into(), code, GrabMode::ASYNC, GrabMode::ASYNC).map_err(os)?.check();
+                match r {
+                    Ok(()) => grabbed.push(m),
+                    Err(err) => {
+                        failed = Some(err);
+                        break;
+                    }
+                }
+            }
+            match failed {
+                None => taken.push(code),
+                Some(err) => {
                     for m in grabbed {
                         let _ = x.conn.ungrab_key(code, x.root, m.into());
                     }
-                    return Err(match err {
+                    busy = Some(match err {
                         ReplyError::X11Error(e) if e.error_kind == ErrorKind::Access => Problem::KeyBusy,
                         other => os(other),
                     });
                 }
             }
         }
-        x.hotkeys.lock().unwrap().push((code, u16::from(mods), shot));
+        if taken.is_empty() {
+            return Err(busy.unwrap_or(Problem::KeyBusy));
+        }
+        eprintln!("zyrik: {key}: коды клавиш {taken:?}");
+        let mut hotkeys = x.hotkeys.lock().unwrap();
+        for code in taken {
+            hotkeys.push((code, u16::from(mods), shot));
+        }
         Ok(())
     }
 

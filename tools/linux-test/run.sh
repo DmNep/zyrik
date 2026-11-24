@@ -114,6 +114,11 @@ paste_size() {  # вставить «с Ctrl» и вернуть размер PN
 hot ctrl+F9; xdotool key Return; overlay_down
 size=$(paste_size)
 check '[ "$size" = "(1600, 900)" ]' "--key-screen: весь монитор ($size)"
+if [ "$size" != "(1600, 900)" ]; then  # что видит X-сервер — для разбора на машине CI
+  xmodmap -pke 2>/dev/null | grep -wE "F9|Control_L"; xset q 2>/dev/null | grep -i "mask"
+  python3 -c "print('состояние клавиатуры:')"; xdotool getmouselocation 2>/dev/null
+  hot ctrl+F9 && echo "второе нажатие ctrl+F9 сработало" || echo "второе нажатие ctrl+F9 не сработало"; xdotool key Escape
+fi
 
 # 7. история 5: щелчок по окну выбирает окно (без оконного менеджера — дети корня)
 xmessage -geometry 320x180+900+120 "окно для щелчка" &
