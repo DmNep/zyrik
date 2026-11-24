@@ -6,7 +6,7 @@
 
 Пока вы выделяете, Зырик сам ищет на снимке приватное — пароли, ключи и токены, сид-фразы, номера карт, почту, телефоны, IP-адреса, пути с именем пользователя — и подсвечивает. Щелчок по подсветке закрашивает. Распознавание текста встроено в программу и работает только на этом компьютере.
 
-Скачать: [последний релиз](https://github.com/DmNep/zyrik/releases/latest) ([Windows](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.1.0.exe), [Linux x86_64](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.1.0-linux-x86_64), [macOS Apple Silicon](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.1.0-macos-aarch64.zip)).
+Скачать: [последний релиз](https://github.com/DmNep/zyrik/releases/latest) ([Windows](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.2.0.exe), [Linux x86_64](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.2.0-linux-x86_64), [macOS Apple Silicon](https://github.com/DmNep/zyrik/releases/latest/download/zyrik-0.2.0-macos-aarch64.zip)).
 
 ## Что программа не делает
 
@@ -71,11 +71,11 @@ PNG сохраняется без метаданных: в файле тольк
 
 ## Windows
 
-Один файл `zyrik-0.1.0.exe`, установка не нужна. Подписи кода нет: SmartScreen может спросить подтверждение при первом запуске.
+Один файл `zyrik-0.2.0.exe`, установка не нужна. Подписи кода нет: SmartScreen может спросить подтверждение при первом запуске.
 
 ## Linux
 
-Один файл `zyrik-0.1.0-linux-x86_64` для обычных дистрибутивов с glibc. Ничего доустанавливать не нужно: X11, Wayland и D-Bus реализованы на Rust внутри программы. Зырик сам выбирает Wayland, если он есть, иначе X11 (`ZYRIK_X11=1` — принудительно X11).
+Один файл `zyrik-0.2.0-linux-x86_64` для обычных дистрибутивов с glibc. Ничего доустанавливать не нужно: X11, Wayland и D-Bus реализованы на Rust внутри программы. Зырик сам выбирает Wayland, если он есть, иначе X11 (`ZYRIK_X11=1` — принудительно X11).
 
 Значок появляется в трее KDE Plasma, XFCE и Cinnamon, в GNOME — с расширением AppIndicator (в Ubuntu оно есть сразу). Если трея нет, работает горячая клавиша.
 
@@ -115,7 +115,7 @@ NoDisplay=true
 
 ## macOS
 
-Архив `zyrik-0.1.0-macos-aarch64.zip` с `Зырик.app` для Apple Silicon, macOS 14 и новее. Распакуйте и перетащите в «Программы». Значок появляется в строке меню, в Dock Зырика нет.
+Архив `zyrik-0.2.0-macos-aarch64.zip` с `Зырик.app` для Apple Silicon, macOS 14 и новее. Распакуйте и перетащите в «Программы». Значок появляется в строке меню, в Dock Зырика нет.
 
 Подпись временная (ad-hoc), без сертификата Apple. При первом открытии macOS может отказаться запускать программу. Тогда откройте её правой кнопкой → «Открыть» или подтвердите в «Системные настройки → Конфиденциальность и безопасность».
 
