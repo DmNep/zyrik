@@ -109,6 +109,9 @@ if [ "$size" != "(1600, 900)" ]; then  # что видит X-сервер — д
   xmodmap -pke 2>/dev/null | grep -wE "F9|Control_L"; xset q 2>/dev/null | grep -i "mask"
   python3 -c "print('состояние клавиатуры:')"; xdotool getmouselocation 2>/dev/null
   hot ctrl+F9 && echo "второе нажатие ctrl+F9 сработало" || echo "второе нажатие ctrl+F9 не сработало"; xdotool key Escape
+  xev -root -event keyboard > /tmp/xev.txt 2>&1 & xv=$!; sleep 0.5
+  xdotool key ctrl+F9; sleep 0.3; xdotool key ctrl+F10; sleep 0.3; kill $xv
+  echo "xev (что пришло на корень):"; grep -E "KeyPress|keycode" /tmp/xev.txt | head -12
 fi
 
 # 7. история 5: щелчок по окну выбирает окно (без оконного менеджера — дети корня)
