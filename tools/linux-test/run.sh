@@ -26,7 +26,7 @@ shots=$(mktemp -d)
 mkdir "$shots/Снимки"
 cd /tmp
 strace -f -qq -e trace=openat,creat,rename,renameat,renameat2,unlink,unlinkat,mkdir,mkdirat,connect,socket -o /tmp/strace.txt \
-  "$exe" --lang ru --save-dir "$shots" --key-screen ctrl+F9 2>/tmp/zyrik.log &
+  "$exe" --lang ru --save-dir "$shots" --key-screen shift+Print 2>/tmp/zyrik.log &
 zpid=$!
 sleep 1.5
 
@@ -102,17 +102,10 @@ paste_size() {  # вставить «с Ctrl» и вернуть размер PN
 }
 
 # 6. история 5: --key-screen — весь монитор сразу выбран
-hot ctrl+F9; xdotool key Return; overlay_down
+# не F-клавиша: в раскладке Xvfb на Ubuntu xdotool жмёт F9 вместе с Ctrl+Alt (уровень переключения VT)
+hot shift+Print; xdotool key Return; overlay_down
 size=$(paste_size)
 check '[ "$size" = "(1600, 900)" ]' "--key-screen: весь монитор ($size)"
-if [ "$size" != "(1600, 900)" ]; then  # что видит X-сервер — для разбора на машине CI
-  xmodmap -pke 2>/dev/null | grep -wE "F9|Control_L"; xset q 2>/dev/null | grep -i "mask"
-  python3 -c "print('состояние клавиатуры:')"; xdotool getmouselocation 2>/dev/null
-  hot ctrl+F9 && echo "второе нажатие ctrl+F9 сработало" || echo "второе нажатие ctrl+F9 не сработало"; xdotool key Escape
-  xev -root -event keyboard > /tmp/xev.txt 2>&1 & xv=$!; sleep 0.5
-  xdotool key ctrl+F9; sleep 0.3; xdotool key ctrl+F10; sleep 0.3; kill $xv
-  echo "xev (что пришло на корень):"; grep -E "KeyPress|keycode" /tmp/xev.txt | head -12
-fi
 
 # 7. история 5: щелчок по окну выбирает окно (без оконного менеджера — дети корня)
 xmessage -geometry 320x180+900+120 "окно для щелчка" &

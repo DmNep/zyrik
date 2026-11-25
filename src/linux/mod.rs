@@ -443,7 +443,6 @@ impl Platform for Linux {
         if taken.is_empty() {
             return Err(busy.unwrap_or(Problem::KeyBusy));
         }
-        eprintln!("zyrik: {key}: коды клавиш {taken:?}");
         let mut hotkeys = x.hotkeys.lock().unwrap();
         for code in taken {
             hotkeys.push((code, u16::from(mods), shot));
